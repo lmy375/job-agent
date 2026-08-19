@@ -24,6 +24,7 @@ def get_config(context: ContextDep) -> dict[str, Any]:
         "configFile": str(settings.config_file) if settings.config_file else None,
         "database": str(settings.storage.database),
         "resume": str(settings.profile.resume),
+        "preferences": str(settings.profile.preferences),
         "report": str(settings.report.output),
         "insightsDir": str(settings.report.insights_dir),
     }

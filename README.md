@@ -5,14 +5,16 @@
 
 ```bash
 uv sync --extra dev          # 安装依赖
-uv run job config init       # 生成 config/config.toml 与 config/.env
-$EDITOR config/.env          # 填 LIEPIN_USER_TOKEN
-$EDITOR config/config.toml   # 改成你自己的城市 / 薪资 / 关键词
+uv run job config init       # 从模板生成 config/ 下缺失的文件
 uv run job search            # 采集职位
 uv run job detail            # 抓 JD
 uv run job report            # 出报告
 uv run job web               # 打开 Web 管理台
 ```
+
+配置怎么填？**在 Claude Code 里跑 `/job-init`**，它会问你需要的信息并写进对应位置
+（token、城市与薪资门槛、关键词分组、简历、求职偏好）。想手填就照 `config/` 下
+各文件的注释改，填完 `uv run job config validate` 自检。
 
 ## 目录结构
 
@@ -22,7 +24,8 @@ config/                用户自己的东西（配置、token、简历、报告�
   config.toml          你的配置
   .env                 猎聘 token
   resume.md            你的简历
-  insights.example/    报告文案模板（进版本库）
+  preferences.md       求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
+  *.example.*          上面每份文件的模板（进版本库）
   insights/            报告里的定性结论（HTML 片段 + 匹配矩阵）
 src/job_agent/
   config/              配置加载与校验（TOML + .env → 校验过的 Settings）
@@ -40,6 +43,8 @@ frontend/              React（Vite）管理台，构建到 frontend/dist 由后
 scripts/               一次性分析脚本（改分类规则时用来核对）
 tests/                 pytest（不碰真实库、不发网络请求）
 data/                  jobs.db 与生成的报告
+.claude/skills/
+  job-init/            `/job-init`：交互式收集信息并填好 config/
 ```
 
 依赖方向单向：`cli` / `web` → `core` → `config`。反向依赖一律禁止。
@@ -51,6 +56,9 @@ data/                  jobs.db 与生成的报告
 - `config/config.toml`：搜索条件、关键词分组、限速、路径、Web 端口、日志级别。
   每一项都有注释，见 `config/config.example.toml`。
 - `config/.env`：`LIEPIN_USER_TOKEN`（前往 <https://www.liepin.com/mcp/auth> 生成）。
+- `config/resume.md`、`config/preferences.md`：你的简历与求职偏好。程序不解析它们，
+  刻意保持自由格式 Markdown——它们是写报告「给我的建议」章节、挑岗位、
+  准备面试问答时的输入。`/job-init` 会带你写；模板见同目录的 `*.example.md`。
 - `config/insights/`：报告里的文字结论，`job config init` 会从 `insights.example/`
   生成一份模板。素材缺失不会让报告失败——定量部分照样出，只是少了文字解读。
 - 环境变量可覆盖：`JOB_AGENT_CONFIG`、`JOB_AGENT_HOME`、`JOB_AGENT_DB`、
@@ -64,6 +72,17 @@ data/                  jobs.db 与生成的报告
 每条职位记录到的 `searchKeyword` 就是「最先命中它的方向」，它同时是分类兜底的依据。
 不再搜索但库里有存量数据的关键词，请保留在配置里并设 `enabled = false`：
 **否则这些职位会因为查不到赛道而整片掉进「其他」**。
+
+## 初始化：`/job-init`
+
+`.claude/skills/job-init/` 是一个 Claude Code skill。在仓库里对 Claude 说
+`/job-init`（或「帮我初始化 job-agent」），它会按 **token → 搜索条件 → 简历 → 求职偏好**
+四步访谈，把答案写进 `config/` 对应文件，最后跑 `job config validate` 与
+`job search --dry-run` 自检。
+
+几个刻意的设计：token 只写进 `config/.env`、不回显、不进对话；已有文件先读再改，
+不整份重写；简历支持粘贴 / 指向已有文件（PDF 自动转文本）/ 从零访谈三种来源；
+问到绩效、婚育这类敏感项会先说明「只存本地、不进版本库」，不答就留空。
 
 ## 命令
 

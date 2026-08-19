@@ -35,6 +35,7 @@ _SCALAR_OVERRIDES: dict[str, tuple[str, ...]] = {
 #: 需要相对项目根解析的路径字段
 _PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("profile", "resume"),
+    ("profile", "preferences"),
     ("storage", "database"),
     ("report", "output"),
     ("report", "insights_dir"),

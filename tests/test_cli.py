@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -64,22 +65,43 @@ def test_config_validate_fails_without_token(project_root, config_path, monkeypa
     assert "LIEPIN_USER_TOKEN" in result.stdout
 
 
-def test_config_init_copies_template(tmp_path, monkeypatch):
+def test_config_init_copies_all_templates(tmp_path, monkeypatch):
+    """init 要把仓库里的每份模板都落地，缺一个用户就会卡在那一步。"""
     root = tmp_path / "proj"
     (root / "config").mkdir(parents=True)
     repo_root = Path(__file__).resolve().parents[1]
-    (root / "config" / "config.example.toml").write_text(
-        (repo_root / "config" / "config.example.toml").read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
+    for name in (
+        "config.example.toml",
+        ".env.example",
+        "resume.example.md",
+        "preferences.example.md",
+    ):
+        (root / "config" / name).write_text(
+            (repo_root / "config" / name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+    shutil.copytree(repo_root / "config" / "insights.example", root / "config" / "insights.example")
+
     monkeypatch.setenv("JOB_AGENT_HOME", str(root))
     result = runner.invoke(app, ["config", "init"])
     assert result.exit_code == 0
-    assert (root / "config" / "config.toml").is_file()
+    for name in ("config.toml", ".env", "resume.md", "preferences.md"):
+        assert (root / "config" / name).is_file(), name
+    assert (root / "config" / "insights" / "ai.html").is_file()
 
-    # 再跑一次不会覆盖
+    # 再跑一次不会覆盖已有内容
+    (root / "config" / "resume.md").write_text("我自己写的", encoding="utf-8")
     result = runner.invoke(app, ["config", "init"])
     assert "已存在" in result.stdout
+    assert (root / "config" / "resume.md").read_text(encoding="utf-8") == "我自己写的"
+
+
+def test_config_validate_reports_missing_profile_files(project_root, config_path):
+    (project_root / "config" / "resume.md").unlink()
+    (project_root / "config" / "preferences.md").unlink()
+    result = run(config_path, "config", "validate")
+    assert result.exit_code == 2
+    assert "简历文件不存在" in result.stdout
+    assert "求职偏好文件不存在" in result.stdout
 
 
 def test_stats_on_empty_db(config_path):

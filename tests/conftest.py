@@ -23,6 +23,7 @@ CONFIG_TOML = """
 [profile]
 name = "测试用户"
 resume = "config/resume.md"
+preferences = "config/preferences.md"
 
 [search]
 address = "北京"
@@ -71,6 +72,7 @@ def project_root(tmp_path: Path) -> Path:
     (tmp_path / "data").mkdir()
     (tmp_path / "config" / "config.toml").write_text(CONFIG_TOML, encoding="utf-8")
     (tmp_path / "config" / "resume.md").write_text("# 测试简历\n", encoding="utf-8")
+    (tmp_path / "config" / "preferences.md").write_text("# 求职偏好\n", encoding="utf-8")
     (tmp_path / "config" / ".env").write_text("LIEPIN_USER_TOKEN=test-token\n", encoding="utf-8")
     return tmp_path
 

@@ -15,6 +15,7 @@ def test_paths_resolved_against_root(settings, project_root):
     assert settings.root == project_root
     assert settings.storage.database == project_root / "data" / "test.db"
     assert settings.profile.resume == project_root / "config" / "resume.md"
+    assert settings.profile.preferences == project_root / "config" / "preferences.md"
     assert settings.storage.database.is_absolute()
 
 

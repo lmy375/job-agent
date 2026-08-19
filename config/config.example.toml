@@ -7,9 +7,11 @@
 # 密钥不放这里：token 写在 config/.env（见 config/.env.example）。
 
 [profile]
-# 求职者信息，只用于报告标题与简历建议章节
+# 求职者信息。resume / preferences 是写报告「给我的建议」章节的输入，
+# 程序不解析内容，自由格式 Markdown 即可（`/job-init` skill 会引导你写）
 name = "你的名字"
 resume = "config/resume.md"
+preferences = "config/preferences.md"
 
 # ---------------------------------------------------------------- 搜索
 [search]

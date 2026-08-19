@@ -4,51 +4,64 @@ from __future__ import annotations
 
 import json
 import shutil
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from job_agent.cli.state import CliState, echo_ok, echo_warn
 from job_agent.config import default_config_path, example_config_path, find_project_root
-from job_agent.config.loader import env_file_path
+from job_agent.config.loader import CONFIG_DIR_NAME, env_file_path
 from job_agent.errors import ConfigError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
 
-@app.command("init", help="从模板生成 config/config.toml 与 config/.env。")
+@app.command("init", help="从模板生成 config/ 下缺失的文件。")
 def init(
     force: Annotated[bool, typer.Option("--force", help="已存在时也覆盖。")] = False,
 ) -> None:
+    """按「模板 → 目标」逐个补齐，已存在的默认不动。
+
+    只生成骨架；里面填什么由 `/job-init` skill 引导（或自己照注释改）。
+    """
     root = find_project_root()
-    example = example_config_path(root)
-    target = default_config_path(root)
-    if not example.is_file():
-        raise ConfigError(f"缺少配置模板：{example}")
+    config_dir = root / CONFIG_DIR_NAME
+    if not example_config_path(root).is_file():
+        raise ConfigError(f"缺少配置模板：{example_config_path(root)}")
 
-    if target.is_file() and not force:
-        echo_warn(f"{target} 已存在（加 --force 覆盖）")
-    else:
-        shutil.copyfile(example, target)
-        echo_ok(f"已生成 {target}")
+    items: list[tuple[Path, Path, str]] = [
+        (example_config_path(root), default_config_path(root), "搜索条件与关键词"),
+        (config_dir / ".env.example", env_file_path(root), "填入 LIEPIN_USER_TOKEN"),
+        (config_dir / "resume.example.md", config_dir / "resume.md", "你的简历"),
+        (config_dir / "preferences.example.md", config_dir / "preferences.md", "你的求职偏好"),
+        (config_dir / "insights.example", config_dir / "insights", "报告里的文字素材"),
+    ]
 
-    env_target = env_file_path(root)
-    env_example = env_target.parent / ".env.example"
-    if env_target.is_file() and not force:
-        echo_warn(f"{env_target} 已存在（加 --force 覆盖）")
-    elif env_example.is_file():
-        shutil.copyfile(env_example, env_target)
-        echo_ok(f"已生成 {env_target}，请填入 LIEPIN_USER_TOKEN")
+    for source, target, note in items:
+        if not source.exists():
+            continue
+        if target.exists() and not force:
+            echo_warn(f"{_rel(target, root)} 已存在，跳过（加 --force 覆盖）")
+            continue
+        if source.is_dir():
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        else:
+            shutil.copyfile(source, target)
+        echo_ok(f"已生成 {_rel(target, root)}（{note}）")
 
-    insights_target = root / "config" / "insights"
-    insights_example = root / "config" / "insights.example"
-    if insights_target.is_dir() and not force:
-        echo_warn(f"{insights_target} 已存在（加 --force 覆盖）")
-    elif insights_example.is_dir():
-        shutil.copytree(insights_example, insights_target, dirs_exist_ok=True)
-        echo_ok(f"已生成 {insights_target}（报告里的文字素材，按需改写）")
+    typer.echo(
+        "\n下一步：让 Claude 跑 `/job-init` 带你把 token、简历与求职偏好填完，"
+        "或自己按文件里的注释改；填好后 job config validate 自检。"
+    )
 
-    typer.echo("\n下一步：填好 token 与搜索关键词后执行 job search")
+
+def _rel(path: Path, root: Path) -> str:
+    """尽量用相对路径展示，输出短一点。"""
+    try:
+        return str(path.relative_to(root))
+    except ValueError:
+        return str(path)
 
 
 @app.command("show", help="打印当前生效的配置（token 已脱敏）。")
@@ -86,6 +99,7 @@ def path(ctx: typer.Context) -> None:
     typer.echo(f"env          {env_file_path(settings.root)}")
     typer.echo(f"database     {settings.storage.database}")
     typer.echo(f"resume       {settings.profile.resume}")
+    typer.echo(f"preferences  {settings.profile.preferences}")
     typer.echo(f"insights     {settings.report.insights_dir}")
     typer.echo(f"report       {settings.report.output}")
 
@@ -101,7 +115,13 @@ def validate(ctx: typer.Context) -> None:
     if not settings.search.keywords:
         problems.append("[[search.groups]] 里没有启用任何关键词，job search 无事可做")
     if not settings.profile.resume.is_file():
-        problems.append(f"简历文件不存在：{settings.profile.resume}")
+        problems.append(
+            f"简历文件不存在：{settings.profile.resume}（跑 /job-init 或 job config init）"
+        )
+    if not settings.profile.preferences.is_file():
+        problems.append(
+            f"求职偏好文件不存在：{settings.profile.preferences}（跑 /job-init 或 job config init）"
+        )
     if not settings.report.insights_dir.is_dir():
         problems.append(
             f"insights 目录不存在：{settings.report.insights_dir}（报告将只有定量部分）"

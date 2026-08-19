@@ -2,6 +2,7 @@
 config/config.toml
 config/.env
 config/resume.md
+config/preferences.md
 config/insights/
 
 # 数据与产物

@@ -28,10 +28,16 @@ class _Model(BaseModel):
 
 
 class ProfileConfig(_Model):
-    """求职者信息。只用于报告标题与「简历建议」章节。"""
+    """求职者信息。
+
+    ``resume`` 与 ``preferences`` 是写报告「给我的建议」章节时的输入，
+    也是 ``job-init`` skill 访谈后落地的两个文件。程序不解析它们的内容——
+    刻意保持自由格式的 Markdown，人和模型都好读好改。
+    """
 
     name: str = ""
     resume: Path = Path("config/resume.md")
+    preferences: Path = Path("config/preferences.md")
 
 
 class KeywordGroup(_Model):
