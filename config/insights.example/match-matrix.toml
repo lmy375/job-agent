@@ -1,0 +1,20 @@
+# 简历匹配矩阵：市场需求 vs 简历现状（报告「给我的建议」章节的表格）
+# level 取值：strong=明显优势 / mid=有但没讲透 / gap=真实缺口
+
+[[row]]
+capability = "某项能力"
+level = "strong"
+demand = "该能力在样本里的出现率与所处角色，最好带上具体百分比"
+resume = "你简历里对应的经历"
+
+[[row]]
+capability = "另一项能力"
+level = "mid"
+demand = "市场怎么描述它（抄 JD 里的原话最有效）"
+resume = "你有相关经历，但简历里没有用市场的词写出来"
+
+[[row]]
+capability = "第三项能力"
+level = "gap"
+demand = "高频要求，但你确实没有"
+resume = "空缺 —— 这才是值得花 1–3 个月补的东西"

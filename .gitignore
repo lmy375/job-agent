@@ -1,0 +1,29 @@
+# 用户自己的东西
+config/config.toml
+config/.env
+config/resume.md
+config/insights/
+
+# 数据与产物
+data/
+*.db
+*.db-wal
+*.db-shm
+*.csv
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# 前端
+frontend/node_modules/
+frontend/dist/
