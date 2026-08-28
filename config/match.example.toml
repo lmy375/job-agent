@@ -1,0 +1,191 @@
+# 匹配信号表 —— 复制为 config/match.toml 后按自己的情况改写。
+#
+# ============================================================================
+# 这份文件是「你想要什么」，不是通用规则。
+#
+# 下面这份示例是给「AI 应用 / Agent 工程方向、想带团队、不想做纯算法和纯安全」
+# 的人写的。**如果你的方向不同，整份重写，不要微调。**
+#     · 做算法训练的人：把「算法训练岗」那条的 weight 从 -12 改成 +12
+#     · 做安全的人：把「纯安全岗」那条改成正信号，并改 [require] 的 pattern
+#     · 做 Web3 的人：[require] 换成区块链词，AI 相关信号降权
+#
+# 不知道该怎么填？在 Claude Code 里跑 `/job-init`，它会问你方向、
+# 明确不看什么、技术栈，然后生成这份表。
+# ============================================================================
+#
+# 正则写法：**一律用单引号**（TOML 字面量字符串，不处理转义），
+# 所以 \b、\s、\d 直接写就行。
+# 千万别用双引号写 "\bagent\b"——TOML 里 \b 是「退格符」转义，
+# 会静默变成 <退格>agent<退格>：正则编译得过、一条也匹配不上、排名看着正常但全错。
+# （真写错了 job config validate 会拦下来，但不如一开始就用单引号。）
+#
+# 打分怎么算：
+#   1. 每条 [[signals]] 的正则在「职位名 + JD 正文」里搜一次，命中就加 weight
+#   2. 命中位置在**职位名**里时，weight × options.title_multiplier（职位名更能代表岗位本质）
+#   3. 同一条信号在标题和正文都命中时只算标题那份，不重复累加
+#   4. 最后按 [require] 判一次「是否完全不对口」
+#
+# 分数只用来**分诊**（把几百条砍到几十条），不代表结论。
+# 「该不该投」要读 JD——跑 `/job-match`。
+
+[options]
+# 职位名命中时的权重倍数。调到 1.0 表示「标题和正文一样重要」，
+# 实测这样会让一堆「JD 里顺口提了一句 Agent」的岗位挤进前列，不建议。
+title_multiplier = 2.0
+
+[require]
+# 职位名与 JD 正文里**都**找不到这些词，说明连赛道都不对（想投 AI 却是个纯 CRUD 后端），
+# 直接扣 penalty 压到排序末尾。
+#
+# 为什么需要这道闸：光靠 [[signals]] 里的负信号，永远穷举不完所有不想要的方向。
+# 正向要求「必须提到我的赛道」比反向排除「不能是 XX 岗」可靠得多。
+pattern = '\bagent\b|智能体|大模型|\bllm\b|\bai\b|人工智能|生成式|agentic'
+penalty = -20.0
+
+# ============================================================ 正信号
+# 权重怎么定：把「这条命中了，我会不会因此想点开看看」当标准。
+#   10 = 看到就想投      6-8 = 明显加分
+#   3-5 = 技术栈对得上    1-2 = 有一点关系
+
+[[signals]]
+name = "AI Agent / 智能体"
+weight = 10
+pattern = '\bagent\b|智能体|agentic|多智能体'
+
+[[signals]]
+name = "MCP 协议"
+weight = 9
+pattern = '\bmcp\b|model\s+context\s+protocol'
+
+[[signals]]
+name = "大模型应用落地"
+weight = 8
+pattern = '大模型应用|llm\s*应用|ai\s*应用|大模型落地|应用落地'
+
+[[signals]]
+name = "AI Coding"
+weight = 8
+pattern = 'ai\s*cod|代码生成|copilot|cursor|claude\s*code|编程助手|研发提效'
+
+[[signals]]
+name = "AI 平台 / 网关"
+weight = 7
+pattern = 'ai\s*(平台|中台)|大模型平台|智能体平台|agent\s*平台|模型网关|llm\s*proxy|推理网关'
+
+[[signals]]
+name = "Tech Lead / 带团队"
+weight = 6
+pattern = 'tech\s*lead|技术负责人|带(领)?团队|团队管理|研发负责人|团队负责人'
+
+[[signals]]
+name = "RAG / 知识库"
+weight = 6
+pattern = '\brag\b|检索增强|知识库|向量(检索|数据库)|语义检索'
+
+[[signals]]
+name = "上下文工程 / 提示工程"
+weight = 6
+pattern = 'prompt|提示词|上下文工程|context\s*engineering|工作流编排|workflow\s*编排|harness'
+
+[[signals]]
+name = "工具调用 / Function Calling"
+weight = 5
+pattern = 'function\s*call|tool\s*(call|use)|工具调用|插件体系'
+
+[[signals]]
+name = "评测 / 可观测"
+weight = 5
+pattern = 'langfuse|langsmith|可观测|评测体系|\beval\b|评估体系'
+
+[[signals]]
+name = "Python"
+weight = 5
+pattern = '\bpython\b'
+
+[[signals]]
+name = "从 0 到 1"
+weight = 4
+pattern = '从\s*0\s*到\s*1|0-1|从零(搭建|开始)|搭建体系'
+
+[[signals]]
+name = "FastAPI"
+weight = 4
+pattern = '\bfastapi\b'
+
+[[signals]]
+name = "Electron / 桌面端"
+weight = 4
+pattern = '\belectron\b|桌面客户端|桌面端'
+
+[[signals]]
+name = "Agent 框架"
+weight = 3
+pattern = '\bagno\b|langchain|langgraph|llamaindex|dify|autogen|crewai|openai\s*agents'
+
+[[signals]]
+name = "前端 / 全栈"
+weight = 3
+pattern = 'typescript|\breact\b|前端|全栈'
+
+[[signals]]
+name = "移动端 / 跨端"
+weight = 3
+pattern = 'react\s*native|跨端'
+
+[[signals]]
+name = "Web3 背景可复用"
+weight = 3
+pattern = '区块链|web3|加密货币|钱包|链上'
+
+# ============================================================ 负信号
+# 这些是**明确不想要**的方向。写在这里而不是靠 [require] 兜，
+# 是因为它们往往同时带着强正信号（「大模型预训练」里有「大模型」），
+# 不显式扣分会排到很前面。
+#
+# 正则较长，但坚持一条一行：TOML 的多行字符串（三引号）为了拼接得用行末续行符，
+# 很容易多一个少一个空格，而正则里的空格是有意义的。
+
+[[signals]]
+name = "非研发职能"
+weight = -16
+pattern = '\bceo\b|\bcfo\b|\bcmo\b|\bcho\b|hrvp|首席(执行|财务|营销|运营)|总裁|总经理|事业部|市场(经理|营销|总监)|销售|解决方案(总监|架构)|售前|咨询顾问|对外事务|战略变革|投融资|人力资源|财务|法务|品牌'
+
+[[signals]]
+name = "商业化 / BD / 增长"
+weight = -15
+pattern = '商业化|业务拓展|客户成功|渠道(经理|总监|运营)|增长负责人|投资(经理|总监)|运营(经理|总监|负责人)'
+
+[[signals]]
+name = "硬件 / 具身 / 自驾"
+weight = -14
+pattern = '芯片|\beda\b|流片|具身|机器人本体|自动驾驶|智能驾驶|\bvla\b|感知算法|激光雷达|车规|整车|硬件研发|嵌入式|穿戴|ar眼镜'
+
+[[signals]]
+name = "纯安全岗"
+weight = -14
+pattern = '渗透测试|等级保护|安全合规|甲方安全|安全运营|\bsoc\b|态势感知|安全审计岗|漏洞挖掘|逆向分析|红蓝对抗|数据安全治理|安全产品经理'
+
+[[signals]]
+name = "算法训练岗"
+weight = -12
+pattern = '预训练|后训练|强化学习|\brlhf\b|模型训练|训练框架|分布式训练|算子|\bcuda\b|推理(加速|优化)|量化压缩|蒸馏|megatron|deepspeed|推荐算法|搜索算法|广告算法|排序模型|召回'
+
+[[signals]]
+name = "内容 / 数字人"
+weight = -12
+pattern = '视频内容|内容(运营|生产|负责人)|数字人|虚拟人|直播'
+
+[[signals]]
+name = "纯产品经理岗"
+weight = -8
+pattern = '产品经理|产品总监|产品负责人'
+
+[[signals]]
+name = "数据工程 / 数仓"
+weight = -8
+pattern = '数据仓库|数仓|\betl\b|flink|spark\s*streaming|iceberg|paimon|clickhouse|doris|starrocks|olap|特征平台|feature\s*store'
+
+[[signals]]
+name = "传统运维"
+weight = -6
+pattern = '运维|\bsre\b|\bdba\b|中间件运维|集群运维|报表开发'

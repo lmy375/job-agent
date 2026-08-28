@@ -56,12 +56,44 @@ max_retries = 2
 [storage]
 database = "data/test.db"
 
+
+[match]
+rules = "config/match.toml"
+shortlist_output = "data/shortlist.md"
+
 [report]
 output = "data/report.html"
 insights_dir = "config/insights"
 
 [logging]
 level = "WARNING"
+"""
+
+
+#: 一份最小可用的信号表。刻意小：测试要能一眼看出「这条分数为什么是这个数」。
+#: 正则用 TOML 字面量字符串（单引号）——双引号里的 \\b 会被当成退格符转义。
+MATCH_TOML = """
+[options]
+title_multiplier = 2.0
+
+[require]
+pattern = '\\bagent\\b|智能体|大模型|\\bllm\\b|\\bai\\b'
+penalty = -20.0
+
+[[signals]]
+name = "Agent"
+weight = 10
+pattern = '\\bagent\\b|智能体'
+
+[[signals]]
+name = "Python"
+weight = 5
+pattern = '\\bpython\\b'
+
+[[signals]]
+name = "算法训练岗"
+weight = -12
+pattern = '预训练|强化学习|模型训练'
 """
 
 
@@ -74,6 +106,7 @@ def project_root(tmp_path: Path) -> Path:
     (tmp_path / "config" / "resume.md").write_text("# 测试简历\n", encoding="utf-8")
     (tmp_path / "config" / "preferences.md").write_text("# 求职偏好\n", encoding="utf-8")
     (tmp_path / "config" / ".env").write_text("LIEPIN_USER_TOKEN=test-token\n", encoding="utf-8")
+    (tmp_path / "config" / "match.toml").write_text(MATCH_TOML, encoding="utf-8")
     return tmp_path
 
 

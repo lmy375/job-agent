@@ -148,6 +148,21 @@ class StorageConfig(_Model):
     database: Path = Path("data/jobs.db")
 
 
+class MatchConfig(_Model):
+    """岗位匹配的输入与产物位置。
+
+    真正的信号表在 ``rules`` 指向的独立文件里，不在这里——它是一张几十行的
+    数据表，且**随人而变**：对一个做应用工程的人「算法训练岗」是负信号，
+    对一个做算法的人就是正信号。所以它属于 ``config/``，绝不能进代码。
+    """
+
+    rules: Path = Path("config/match.toml")
+    #: `job shortlist` 的默认输出位置
+    shortlist_output: Path = Path("data/shortlist.md")
+    #: 只看薪资上限不低于这个数的岗位（万元/年，税前口径）。留空表示不过滤
+    salary_floor_wan: float | None = Field(default=None, ge=0)
+
+
 class ReportConfig(_Model):
     output: Path = Path("data/job-report.html")
     insights_dir: Path = Path("config/insights")
@@ -194,6 +209,7 @@ class Settings(_Model):
     liepin: LiepinConfig = Field(default_factory=LiepinConfig)
     detail: DetailConfig = Field(default_factory=DetailConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
+    match: MatchConfig = Field(default_factory=MatchConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

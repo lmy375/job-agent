@@ -12,6 +12,7 @@ import typer
 from job_agent.cli.state import CliState, echo_ok, echo_warn
 from job_agent.config import default_config_path, example_config_path, find_project_root
 from job_agent.config.loader import CONFIG_DIR_NAME, env_file_path
+from job_agent.core.matching import load_rules
 from job_agent.errors import ConfigError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -35,6 +36,7 @@ def init(
         (config_dir / ".env.example", env_file_path(root), "填入 LIEPIN_USER_TOKEN"),
         (config_dir / "resume.example.md", config_dir / "resume.md", "你的简历"),
         (config_dir / "preferences.example.md", config_dir / "preferences.md", "你的求职偏好"),
+        (config_dir / "match.example.toml", config_dir / "match.toml", "岗位匹配信号表"),
         (config_dir / "insights.example", config_dir / "insights", "报告里的文字素材"),
     ]
 
@@ -79,7 +81,10 @@ def show(
     typer.secho(f"配置文件：{settings.config_file or '（未找到，使用内置默认值）'}", bold=True)
     typer.echo(f"项目根目录：{settings.root}")
     typer.echo(f"token：{'已配置' if settings.token else '未配置（无法访问接口）'}")
-    for section in ("profile", "search", "liepin", "detail", "storage", "report", "web", "logging"):
+    for section in (
+        "profile", "search", "liepin", "detail", "storage",
+        "match", "report", "web", "logging",
+    ):
         typer.secho(f"\n[{section}]", fg=typer.colors.CYAN)
         for key, value in data[section].items():
             if key == "groups":
@@ -100,6 +105,8 @@ def path(ctx: typer.Context) -> None:
     typer.echo(f"database     {settings.storage.database}")
     typer.echo(f"resume       {settings.profile.resume}")
     typer.echo(f"preferences  {settings.profile.preferences}")
+    typer.echo(f"match        {settings.match.rules}")
+    typer.echo(f"shortlist    {settings.match.shortlist_output}")
     typer.echo(f"insights     {settings.report.insights_dir}")
     typer.echo(f"report       {settings.report.output}")
 
@@ -122,6 +129,18 @@ def validate(ctx: typer.Context) -> None:
         problems.append(
             f"求职偏好文件不存在：{settings.profile.preferences}（跑 /job-init 或 job config init）"
         )
+    if not settings.match.rules.is_file():
+        problems.append(
+            f"匹配信号表不存在：{settings.match.rules}"
+            "（跑 /job-init 或 job config init；缺它 job match / job shortlist 跑不了）"
+        )
+    else:
+        # 存在就顺手解析一遍：正则写错、权重写成字符串这类问题要在这里暴露，
+        # 而不是等 job match 跑到一半才炸
+        try:
+            load_rules(settings.match.rules)
+        except ConfigError as exc:
+            problems.append(str(exc))
     if not settings.report.insights_dir.is_dir():
         problems.append(
             f"insights 目录不存在：{settings.report.insights_dir}（报告将只有定量部分）"

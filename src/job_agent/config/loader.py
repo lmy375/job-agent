@@ -37,6 +37,8 @@ _PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("profile", "resume"),
     ("profile", "preferences"),
     ("storage", "database"),
+    ("match", "rules"),
+    ("match", "shortlist_output"),
     ("report", "output"),
     ("report", "insights_dir"),
     ("web", "frontend_dist"),

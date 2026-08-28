@@ -1,5 +1,23 @@
 # job-agent
 
+> **产品核心定位：这是一个求职系统。**
+>
+> 不是爬虫，也不是数据分析工具库。它的目标是端到端支撑一个人完成一次求职：
+> 从「我是谁、我想要什么」开始，到「该投哪几个岗、为什么、怎么谈」结束。
+>
+> 由此确定分工——**CLI 负责确定性，skill 负责判断**：
+>
+> - **CLI**（本仓库代码）承担一切可重跑、可测试、结果可比的环节：
+>   采集、限流退避、去重、JD 解析、薪资换算、按规则打分排序、生成报告。
+>   同样的库跑两次，结论必须一样。
+> - **Skill**（`.claude/skills/`）承担需要语言理解、代码穷举不出来的环节：
+>   读 JD 判断硬门槛冲突、比对简历措辞与市场词汇、排投递优先级、准备面试口径。
+> - **`config/`** 承担一切因人而异的东西：简历、求职偏好、搜索关键词、
+>   匹配信号表。**换一个用户，只应该换 `config/`，不该改代码。**
+>
+> 判断一个新功能该不该加、加在哪，就用这三条对照：
+> 结论必须稳定复现的 → CLI；需要读懂文字才能下判断的 → skill；随人而变的 → config。
+
 猎聘职位工具链：批量搜索 → 抓取详情页 JD → 赛道 / 技能统计 → 生成 HTML 市场报告 → 投递，
 数据全部落在本地 SQLite。提供 **CLI** 与 **Web 管理台**两套入口，配置与个人资料全部在 `config/`。
 
@@ -8,13 +26,23 @@ uv sync --extra dev          # 安装依赖
 uv run job config init       # 从模板生成 config/ 下缺失的文件
 uv run job search            # 采集职位
 uv run job detail            # 抓 JD
+uv run job match             # 按信号表给职位打分排序（分诊）
+uv run job shortlist         # 生成候选清单骨架
 uv run job report            # 出报告
 uv run job web               # 打开 Web 管理台
 ```
 
 配置怎么填？**在 Claude Code 里跑 `/job-init`**，它会问你需要的信息并写进对应位置
-（token、城市与薪资门槛、关键词分组、简历、求职偏好）。想手填就照 `config/` 下
-各文件的注释改，填完 `uv run job config validate` 自检。
+（token、城市与薪资门槛、关键词分组、简历、求职偏好、匹配信号表）。想手填就照
+`config/` 下各文件的注释改，填完 `uv run job config validate` 自检。
+
+采完数据之后**跑 `/job-match`**：它读 JD、比硬门槛、排投递优先级、写投递口径，
+把 `job shortlist` 留白的判断部分填掉。完整流程：
+
+```
+job search → job detail → job match → job shortlist → /job-match → job apply
+                       ↘ job report / job web （看市场大盘）
+```
 
 ## 目录结构
 
@@ -25,6 +53,7 @@ config/                用户自己的东西（配置、token、简历、报告�
   .env                 猎聘 token
   resume.md            你的简历
   preferences.md       求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
+  match.toml           匹配信号表：正负信号 + 权重（决定 job match 的排序）
   *.example.*          上面每份文件的模板（进版本库）
   insights/            报告里的定性结论（HTML 片段 + 匹配矩阵）
 src/job_agent/
@@ -34,17 +63,21 @@ src/job_agent/
     storage/           SQLite：ORM 模型、仓储、轻量迁移
     services/          用例编排：search / detail / apply（带进度回调与取消）
     analysis/          赛道分类、技能词典、统计聚合
+    matching/          按信号表打分排序 + 候选清单骨架（只分诊，不下结论）
+    resume/            PDF / DOCX / TXT 简历 → 纯文本
     report/            HTML 报告渲染 + insights 素材加载
     jd_parser.py       详情页 → 结构化 JD（纯函数）
-    salary.py          薪资文本 → 年薪区间（万元）
+    salary.py          薪资文本 → 年薪区间（万元，税前）
   cli/                 typer 子命令
   web/                 FastAPI 管理后端 + 后台任务
 frontend/              React（Vite）管理台，构建到 frontend/dist 由后端托管
 scripts/               一次性分析脚本（改分类规则时用来核对）
 tests/                 pytest（不碰真实库、不发网络请求）
-data/                  jobs.db 与生成的报告
+data/                  jobs.db、生成的报告
+  shortlist.md         job shortlist 的产物：候选清单（判断部分留白给 skill 填）
 .claude/skills/
   job-init/            `/job-init`：交互式收集信息并填好 config/
+  job-match/           `/job-match`：读 JD、比硬门槛、排投递优先级、写投递口径
 ```
 
 依赖方向单向：`cli` / `web` → `core` → `config`。反向依赖一律禁止。
@@ -89,6 +122,9 @@ data/                  jobs.db 与生成的报告
 ```bash
 job search [-k 关键词]... [--pages N] [--dry-run]
 job detail [--limit N] [--retry-failed]
+job match [--floor 万] [--top N] [--why] [--json] [--no-dedupe]
+job shortlist [-o 输出路径] [--limit N] [--floor 万]
+job resume import <文件> [-o 输出路径] [--force]
 job apply <jobId>... [--job-kind 1|2] [--yes]
 job report [-o 输出路径] [--no-dedupe]
 job stats [--tracks]
@@ -99,12 +135,71 @@ job db info|migrate|vacuum
 
 全局选项：`--config` 指定配置文件、`--log-level`、`--quiet`、`--version`。
 
-退出码：`2` 配置/鉴权问题、`3` 存储、`4` 报告、`5` 接口错误、`6` 触发限流。
+退出码：`2` 配置/鉴权问题、`3` 存储、`4` 报告、`5` 接口错误或简历抽取失败、`6` 触发限流。
 脚本里可以据此判断「今天别再投了」。
 
 `job apply` 默认会列出待投职位并要求确认（`--yes` 跳过）。投递结果（含「已投递过」
 「职位已结束」）都会记进本地 `applications` 表——**猎聘没有查询投递记录的接口**，
 这张表是唯一的账本。
+
+## 挑岗位：`job match` / `job shortlist` / `/job-match`
+
+采集解决「有哪些岗」，这三样解决「该投哪几个」。分界线是**确定性 vs 判断**：
+
+```bash
+uv run job match --top 30 --why       # 打分排序，--why 展开命中与扣分理由
+uv run job match --json               # 给脚本用
+uv run job shortlist --limit 12       # 写出 data/shortlist.md（判断部分留白）
+```
+
+`job match` 的排序来自 `config/match.toml` 的信号表，**它是配置不是代码**——
+编码的是「你想要什么」，换个人应当整份重写：
+
+```toml
+[require]                     # 职位名与 JD 都不含这些词 = 连赛道都不对，压到末尾
+pattern = '\bagent\b|智能体|大模型'
+penalty = -20.0
+
+[[signals]]
+name = "AI Agent / 智能体"
+weight = 10                   # 正数加分，负数即「不想要的方向」
+pattern = '\bagent\b|智能体|agentic'
+
+[[signals]]
+name = "算法训练岗"
+weight = -12                  # 做算法的人把这条改成 +12 就行
+pattern = '预训练|后训练|强化学习|模型训练'
+```
+
+三个必须知道的口径：
+
+- **正则一律用单引号**（TOML 字面量字符串）。双引号里 `\b` 是 TOML 的「退格符」
+  转义，`"\bagent\b"` 会静默变成 `<退格>agent<退格>`——正则编译得过、
+  一条也匹配不上、排名看着正常但结论全错。`job config validate` 会拦下来。
+- **薪资门槛过滤的是「上限」不是「下限」**。JD 区间的上限才代表「这家最多给到多少」；
+  按下限过滤会误杀「50-80k·20薪」这类实际能谈上去的岗位。
+- **分数只做分诊，不代表结论。** 它把几百条砍到几十条；
+  「这个岗要 50 人管理经验而你带 5 人」这种判断要读 JD，是 `/job-match` 的事。
+  第 1 名可能有硬门槛冲突，第 8 名可能才是最该投的。
+
+`job shortlist` 产出的 Markdown 里，每条岗位有三处 `<待 /job-match 填写>`：
+**硬门槛核对**、**投不投**、**投递口径**。代码刻意不填——填了模板话术，
+人会以为已经分析过了，比留空更糟。
+
+## 导入简历：`job resume import`
+
+```bash
+uv run job resume import ~/Downloads/我的简历.pdf     # 打到 stdout
+uv run job resume import 简历.docx -o /tmp/resume.txt
+```
+
+支持 `.pdf`（pypdf）、`.docx`（直接解 zip 里的 XML，不引 lxml）、`.md` / `.txt`。
+`.doc` 不支持，另存为 `.docx` 或导出 PDF。
+
+**它只抽纯文本，不写 `config/resume.md`**——抽出来的是没有结构的文字，
+直接覆盖会把排版和数字弄丢。整理成结构化 Markdown 是 `/job-init` 的工作：
+它会保留全部事实与数字、对齐市场词汇、缺信息时留 `<待补>`。
+（真要覆盖得加 `--force`，命令会先拦你一次。）
 
 ## Web 管理台
 

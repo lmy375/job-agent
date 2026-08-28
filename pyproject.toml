@@ -11,6 +11,9 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "typer>=0.12",
+    # 只用来抽 PDF 简历文本：纯 Python、无编译依赖。
+    # DOCX 直接解 zip 里的 XML，不引 python-docx（连带 lxml 需要编译）
+    "pypdf>=4.0",
 ]
 
 [project.optional-dependencies]

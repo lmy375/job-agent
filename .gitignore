@@ -3,6 +3,7 @@ config/config.toml
 config/.env
 config/resume.md
 config/preferences.md
+config/match.toml
 config/insights/
 
 # 数据与产物

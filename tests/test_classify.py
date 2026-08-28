@@ -96,3 +96,42 @@ def test_ai_security_goes_to_security_track():
 def test_signal_count_counts_occurrences():
     assert signal_count("区块链 区块链 智能合约", WEB3) >= 3
     assert signal_count("与业务方对齐预期", AI) == 0
+
+
+# ---------------------------------------------------------------- 缩写边界回归
+#
+# 两三个字母的英文缩写在 IGNORECASE 下会命中英文单词的中段。
+# 这几条是实测踩到的：都被误判成「非技术岗」，而且都是高价值的 Agent 平台岗。
+
+
+@pytest.mark.parametrize(
+    ("title", "jd"),
+    [
+        # UI 命中 "B(ui)lder"
+        ("点评技术-AI Builder 团队负责人", "Agent 平台建设 大模型 提效 Prompt 工程"),
+        # PR 命中 "(Pr)oxy"
+        ("LLM Proxy 平台负责人", "大模型网关 推理路由 Agent 编排"),
+        # UX 同理，构造一个含 "ux" 的英文产品名
+        ("Flux Agent 平台工程师", "智能体 平台 大模型 编排"),
+    ],
+)
+def test_ascii_abbreviations_do_not_match_inside_words(title, jd):
+    track, role = classify(title, jd, None)
+    assert (track, role) != ("其他", "非技术岗"), f"{title} 被误判成非技术岗"
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "UI设计师",  # 中文紧跟，不能用 \b
+        "UI/UX 设计",
+        "高级UX研究员",
+        "HRVP/CHO",  # HR 只限前边界，HRVP / HRBP / HRD 要留住
+        "HRBP",
+        "高级BD经理",
+        "PR 传播总监",
+    ],
+)
+def test_genuine_non_technical_roles_still_matched(title):
+    track, role = classify(title, "岗位职责", None)
+    assert (track, role) == ("其他", "非技术岗"), f"{title} 应当仍被判为非技术岗"
