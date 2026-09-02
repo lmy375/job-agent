@@ -1,6 +1,6 @@
 ---
 name: job-init
-description: 交互式初始化 job-agent 的某个 profile——选定或新建 profile，收集猎聘 token、搜索条件与关键词分组，并引导用户写出简历与求职偏好。当用户说「初始化 job-agent」「配置 job-agent」「帮我填简历 / 求职偏好」「新建一个 profile」「job-init」，或在这个仓库里第一次准备采集职位、`job config validate` 报缺文件时使用。
+description: 交互式初始化 job-agent 的某个 profile——选定或新建 profile，收集猎聘 token、搜索条件与关键词，并引导用户写出简历与求职偏好。当用户说「初始化 job-agent」「配置 job-agent」「帮我填简历 / 求职偏好」「新建一个 profile」「job-init」，或在这个仓库里第一次准备采集职位、`job config validate` 报缺文件时使用。
 ---
 
 # job-init
@@ -92,17 +92,17 @@ uv run job profile new <名字>      # profile 骨架：profile.toml、resume.md
 门槛设成目标值会把大量实际能谈到位的岗位挡在外面。
 把这个理由讲给用户，别默默替他调。
 
-## 第 4 步：关键词分组（`[[search.groups]]`）
+## 第 4 步：搜索关键词（`[search].keywords`）
 
-问用户「想投什么方向」，按他说的方向生成分组，
-候选关键词清单见 `references/interview.md`。三条硬规则：
+问用户「想投什么方向」，按他说的方向列关键词，
+候选清单见 `references/interview.md`。四条硬规则：
 
-- **数组顺序 = 优先级**。因为按 jobId 去重，每条职位记到的 `searchKeyword` 是
-  「最先命中它的方向」——最想要的方向放最前面。
-- **`track` 只是分组标签**，随便起：「前端」「数据」「量子计算」都行，
-  程序不拿它做任何判断（仓库不做赛道分类，见 CLAUDE.md）。
-- **暂时不搜的方向写 `enabled = false` 保留下来**比删掉好——
-  留着能看出库里存量数据是怎么来的。
+- **一个扁平数组，顺序 = 优先级**。因为按 jobId 去重，每条职位记到的
+  `searchKeyword` 是「最先命中它的那个词」——最想要的方向放最前面。
+- **不要按方向分组**（没有 `[[search.groups]]` 这种写法了）。
+  用户如果说「我还想顺便看看 Web3」，那是**另开一个 profile**，
+  不是往这个 profile 里加一组——一个 profile 就是一个方向 / 一个人。
+- **暂时不搜的词注释掉**，比删掉好——留着能看出库里存量数据是怎么来的。
 - 关键词要**具体**（「AI Agent」「大模型」），别用「工程师」这种词——
   单个关键词最多返回 120 条，太宽等于只看一个随机切片。
 
@@ -163,7 +163,7 @@ uv run job search --dry-run
 
 | 信号表里的 | 从哪来 |
 | --- | --- |
-| `[require].pattern` | 用户说的目标方向（第 4 步的关键词分组） |
+| `[require].pattern` | 用户说的目标方向（第 4 步的关键词） |
 | 正信号（weight > 0） | `resume.md` 里真实做过的技术栈 + 想做的方向 |
 | 负信号（weight < 0） | `preferences.md` 的「不看的岗位」 |
 

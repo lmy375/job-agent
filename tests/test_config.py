@@ -77,7 +77,6 @@ def test_blank_secret_is_none(project_root):
 
 
 def test_keywords_flattened_in_priority_order(settings):
-    # 禁用的组不参与搜索
     assert settings.search.keywords == ["AI Agent", "大模型", "安全专家"]
 
 
@@ -92,12 +91,16 @@ def test_salary_without_kind_is_rejected(project_root):
         load_with_profile(project_root, "[search]\nsalary_floor = 1000000\n")
 
 
-def test_any_track_label_is_accepted(project_root):
-    """track 只是分组标签，不再是四选一的赛道枚举——换个方向的人不用改代码。"""
+def test_keywords_are_a_flat_deduped_list(project_root):
+    """关键词是扁平数组，不按方向分组——profile 已经是「方向」这一层了。
+
+    顺带钉住清洗规则：去空白、丢空串、去重且保留首次出现的位置（顺序=优先级）。
+    """
     settings = load_with_profile(
-        project_root, '[[search.groups]]\ntrack = "量子计算"\nkeywords = ["x"]\n'
+        project_root,
+        '[search]\nkeywords = [" AI Agent ", "大模型", "", "AI Agent", "量子计算"]\n',
     )
-    assert settings.search.groups[0].track == "量子计算"
+    assert settings.search.keywords == ["AI Agent", "大模型", "量子计算"]
 
 
 def test_missing_config_file(tmp_path):

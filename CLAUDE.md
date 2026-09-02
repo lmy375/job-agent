@@ -33,7 +33,7 @@
 几百行职位名分类正则），已经整体删除。删掉的理由是它违反了上面第一条推论：
 
 - 赛道 `("AI", "Web3", "安全", "后端")` 写死在 `src/tracks.py`，
-  而且是 `Literal` 类型——做前端或数据的人**连 `[[search.groups]]` 都配不出来**，
+  而且是 `Literal` 类型——做前端或数据的人**连搜索关键词都配不出来**，
   不是「报告不合口味」，是整条采集链路走不通。
 - 技能词典、职位名正则、报告里「Web3 样本不足，用后端作对照组」这类文案，
   编码的全是某一个人某一次采集的判断。
@@ -116,7 +116,7 @@ config/
   templates/           # 新建 profile 的模板，整份 copytree 过去
 profiles/              # 整个目录不进版本库
   default/
-    profile.toml       # 搜索条件与关键词分组、match 门槛
+    profile.toml       # 搜索条件与关键词、match 门槛
     resume.md  preferences.md  match.toml
     data/              # jobs.db、shortlist.md、agent-plan.md
   web3/
@@ -149,6 +149,11 @@ loader 再按段名告诉你它该在哪个文件里。段不重叠还保证了�
   那个名字会被 pydantic-settings 当成给 `[profile]` 整段赋 JSON。）
 - **代码里不出现任何 profile 名字，也不拼 `data/jobs.db` 这类路径**——
   一律问 `settings`。skill 与外部脚本用 `job config path --json`。
+- **profile 内部不要再按方向分层。** `[search].keywords` 是扁平数组，
+  不是「按赛道分组的关键词表」——想同时跑两条线就开两个 profile。
+  曾经有过 `[[search.groups]]`（带 `track` 标签与 `enabled` 开关），
+  它存在的真正理由是给分类兜底供数；分类删掉之后它就只是把 profile
+  这一层重复了一遍，已一并删除。同一个概念不要在两个粒度上各实现一次。
 
 ```bash
 job profile list          # 有哪些 profile、哪个是默认、各自多少条数据
@@ -181,7 +186,7 @@ job-agent [-p <名字>] [--collect] [--apply]   # 同一条流程的无人值守
 | 文件 | 管什么 | 谁生成 |
 | --- | --- | --- |
 | `config/config.toml` | 猎聘账号密钥、限速、模型接入点、Web、日志 | `job config init` + `/job-init` |
-| `profiles/<名>/profile.toml` | 搜索条件、关键词分组、`[match]` 路径与薪资门槛 | `job profile new` + `/job-init` |
+| `profiles/<名>/profile.toml` | 搜索条件、搜索关键词、`[match]` 路径与薪资门槛 | `job profile new` + `/job-init` |
 | `profiles/<名>/resume.md` | 简历（`job resume import` 抽文本，skill 整理） | `/job-init` |
 | `profiles/<名>/preferences.md` | 硬约束、薪资口径与底线、面试口径 | `/job-init` |
 | `profiles/<名>/match.toml` | **匹配信号表**——正负信号 + 权重 | `/job-init` |

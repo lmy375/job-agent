@@ -95,7 +95,7 @@ class SearchService:
 
         if not todo:
             self.progress.emit(
-                "没有可用的搜索关键词：请在 config/config.toml 的 [[search.groups]] 里配置",
+                "没有可用的搜索关键词：请在 profile.toml 的 [search].keywords 里配置",
                 level="warn",
             )
             return summary

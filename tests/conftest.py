@@ -63,19 +63,7 @@ address = "北京"
 salary_kind = "年薪"
 salary_floor = 1000000
 max_pages = 2
-
-[[search.groups]]
-track = "AI"
-keywords = ["AI Agent", "大模型"]
-
-[[search.groups]]
-track = "安全"
-keywords = ["安全专家"]
-
-[[search.groups]]
-track = "Web3"
-enabled = false
-keywords = ["区块链"]
+keywords = ["AI Agent", "大模型", "安全专家"]
 
 [storage]
 database = "data/test.db"

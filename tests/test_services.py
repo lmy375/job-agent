@@ -118,7 +118,7 @@ def test_search_can_be_cancelled(settings, context):
 def test_search_without_configured_keywords_is_a_noop(settings, context):
     """一个关键词都没启用时要明确提示，而不是静默什么都不做。"""
     empty = settings.model_copy(deep=True)
-    empty.search.groups = []
+    empty.search.keywords = []
     events = []
     service = SearchService(empty, FakeClient(), context.jobs, events.append)
     summary = service.run()

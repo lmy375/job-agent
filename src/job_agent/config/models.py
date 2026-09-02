@@ -94,27 +94,6 @@ class ProfileConfig(_Model):
     preferences: Path = Path("preferences.md")
 
 
-class KeywordGroup(_Model):
-    """一组搜索关键词。
-
-    ``track`` 只是这组关键词的**标签**，给人看的（配置里分组、Web 上展示），
-    程序不拿它做任何判断——赛道分类是分析，不在这个仓库里，见 CLAUDE.md
-    「不承担市场分析」一节。所以它是自由文本：写「前端」「数据」「Web3」都行。
-    """
-
-    track: str = Field(min_length=1)
-    keywords: list[str] = Field(min_length=1)
-    enabled: bool = True
-
-    @field_validator("keywords")
-    @classmethod
-    def _strip(cls, value: list[str]) -> list[str]:
-        cleaned = [k.strip() for k in value if k.strip()]
-        if not cleaned:
-            raise ValueError("keywords 不能为空")
-        return cleaned
-
-
 class SearchConfig(_Model):
     """搜索条件。字段留空即不按该维度过滤。"""
 
@@ -127,7 +106,13 @@ class SearchConfig(_Model):
     edu_level: EduLevel | None = None
     work_experience: WorkExperience | None = None
     max_pages: int = Field(default=MAX_PAGE, ge=1, le=MAX_PAGE)
-    groups: list[KeywordGroup] = Field(default_factory=list)
+    #: 搜索关键词，**数组顺序 = 优先级**。
+    #:
+    #: 刻意是一个扁平数组，不再按方向分组：一个 profile 就是一个方向 /
+    #: 一个人，组内再分组是把 profile 这一层重复了一遍。临时只搜某几个词用
+    #: ``job search -k``；不想再搜的词在 TOML 里注释掉即可
+    #: （留着能看出库里存量数据是怎么来的）。
+    keywords: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_salary(self) -> SearchConfig:
@@ -141,17 +126,15 @@ class SearchConfig(_Model):
             raise ValueError("配置了 salary_floor / salary_cap 时必须同时给出 salary_kind")
         return self
 
-    @property
-    def enabled_groups(self) -> list[KeywordGroup]:
-        return [g for g in self.groups if g.enabled]
-
-    @property
-    def keywords(self) -> list[str]:
-        """按配置顺序（= 优先级）展开的关键词，去重且保留首次出现的位置。"""
+    @field_validator("keywords")
+    @classmethod
+    def _clean_keywords(cls, value: list[str]) -> list[str]:
+        """去空白、丢空串、去重且保留首次出现的位置（顺序就是优先级）。"""
         seen: dict[str, None] = {}
-        for group in self.enabled_groups:
-            for keyword in group.keywords:
-                seen.setdefault(keyword, None)
+        for keyword in value:
+            cleaned = keyword.strip()
+            if cleaned:
+                seen.setdefault(cleaned, None)
         return list(seen)
 
 

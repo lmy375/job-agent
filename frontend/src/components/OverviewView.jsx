@@ -75,13 +75,7 @@ export default function OverviewView() {
                       : "不限"
                   }`}
                 />
-                <Row
-                  k="启用的关键词"
-                  v={settings.search.groups
-                    .filter((g) => g.enabled)
-                    .map((g) => `${g.track}：${g.keywords.join("、")}`)
-                    .join("　|　")}
-                />
+                <Row k="搜索关键词（顺序即优先级）" v={settings.search.keywords.join("、")} />
                 <Row k="接口限速" v={`${settings.liepin.rate_limit_per_min} 次/分钟`} />
               </tbody>
             </table>

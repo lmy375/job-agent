@@ -104,11 +104,10 @@ def show(
                     filled = "token 已填" if account.user_token else "token 未填"
                     typer.echo(f"  {mark} {name:<12}{filled}")
                 continue
-            if key == "groups":
-                # 关键词分组按模型读，字段名有 schema 兜着
-                for group in block.groups:
-                    flag = "" if group.enabled else "（已禁用）"
-                    typer.echo(f"  {group.track:<6}{flag} {'、'.join(group.keywords)}")
+            if key == "keywords":
+                # 顺序就是优先级，编号打出来免得看不出先后
+                for index, keyword in enumerate(block.keywords, 1):
+                    typer.echo(f"  {index:>2}. {keyword}")
                 continue
             typer.echo(f"  {key:<20}{value}")
 
@@ -157,7 +156,7 @@ def validate(ctx: typer.Context) -> None:
             "（config/config.toml 的 [liepin.accounts.*]），无法搜索或投递"
         )
     if not settings.search.keywords:
-        problems.append("[[search.groups]] 里没有启用任何关键词，job search 无事可做")
+        problems.append("[search].keywords 是空的，job search 无事可做")
     if not settings.profile.resume.is_file():
         problems.append(f"简历文件不存在：{settings.profile.resume}（跑 /job-init）")
     if not settings.profile.preferences.is_file():

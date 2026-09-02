@@ -51,7 +51,7 @@ uv run job profile use web3  # 把它设成默认，之后不用每次带 -p
 ```
 
 配置怎么填？**在 Claude Code 里跑 `/job-init`**，它会问你需要的信息并写进对应位置
-（token、城市与薪资门槛、关键词分组、简历、求职偏好、匹配信号表）。想手填就照
+（token、城市与薪资门槛、搜索关键词、简历、求职偏好、匹配信号表）。想手填就照
 两份配置文件里的注释改，填完 `uv run job config validate` 自检。
 
 采完数据之后**跑 `/job-match`**：它读 JD、比硬门槛、排投递优先级、写投递口径，
@@ -72,7 +72,7 @@ config/                跟人无关的那一半
   templates/           新建 profile 的模板，整份拷成一个新 profile（进版本库）
 profiles/              随人而变的那一半，整个目录不进版本库
   <名字>/               一个 profile = 一个人 / 一种求职场景，自包含
-    profile.toml       搜索条件、关键词分组、匹配门槛
+    profile.toml       搜索条件、搜索关键词、匹配门槛
     resume.md          你的简历
     preferences.md     求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
     match.toml         匹配信号表：正负信号 + 权重（决定 job match 的排序）
@@ -119,7 +119,7 @@ tests/                 pytest（不碰真实库、不发网络请求）
   猎聘 token 填在 `[liepin.accounts.<账号名>].user_token`，前往
   <https://www.liepin.com/mcp/auth> 生成。可以同时放几个人的账号，
   profile 用 `[profile].account` 指一个——换人不用来回重贴 token。
-- `profiles/<名>/profile.toml`：搜索条件、关键词分组、匹配门槛。
+- `profiles/<名>/profile.toml`：搜索条件、搜索关键词、匹配门槛。
   里面的相对路径都相对于**这个 profile 的目录**，所以两个 profile 的
   `data/jobs.db` 是两个库。
 - `profiles/<名>/resume.md`、`preferences.md`：你的简历与求职偏好。程序不解析它们，
@@ -143,11 +143,13 @@ tests/                 pytest（不碰真实库、不发网络请求）
 静默忽略是配置系统最容易埋的坑（把 `salary_floor` 写成 `salaryFloor`，
 结果搜出一堆不达标的岗位却毫无提示）。
 
-关键词按数组顺序（= 优先级）搜索。因为按 jobId 去重且先搜高优先级方向，
-每条职位记录到的 `searchKeyword` 就是「最先命中它的方向」。
-不想再搜某个方向时，把那组设 `enabled = false` 即可（比删掉好：留着能看出
-库里存量数据是怎么来的）。`[[search.groups]].track` 只是分组标签，
-写「前端」「数据」还是「量子计算」都行——程序不拿它做任何判断。
+`[search].keywords` 是一个**扁平数组，顺序即优先级**。因为按 jobId 去重且先搜
+高优先级的词，每条职位记录到的 `searchKeyword` 就是「最先命中它的那个词」。
+
+刻意不按方向分组——**一个 profile 就是一个方向 / 一个人**，组内再分组是把
+profile 这一层重复了一遍。想同时跑两条线就开两个 profile
+（`job profile new web3`）。临时只搜某几个词用 `job search -k`；
+不想再搜的词在 TOML 里注释掉即可，留着能看出库里存量数据是怎么来的。
 
 ## 初始化：`/job-init`
 
