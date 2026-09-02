@@ -50,7 +50,7 @@ class Database:
     def setup(self) -> Database:
         """建表。幂等，每个入口启动时调一次即可。
 
-        **不做迁移**：库结构变了就 `job reset` 删库重建（见 CLAUDE.md 硬规则）。
+        **不做迁移**：库结构变了就 `job db reset` 删库重建（见 CLAUDE.md 硬规则）。
         """
         try:
             Base.metadata.create_all(self.engine)

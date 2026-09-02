@@ -6,9 +6,8 @@
     job agent                  LangGraph 路线：无人值守跑完整条流程
     job stats                  在终端看一眼库里现在有什么
     job web                    启动 Web 管理服务
-    job reset                  删库重建（结构变了就重来，不做迁移）
     job config init|show|path  管理配置
-    job db info|vacuum         数据库维护
+    job db info|vacuum|reset   数据库维护（reset = 删库重建，不做迁移）
 """
 
 from __future__ import annotations

@@ -147,7 +147,7 @@ def test_keyword_counts_and_salary_summary(context):
 
 
 def test_reset_drops_and_recreates(context):
-    """`job reset` 的底座：删文件重建，旧数据一条不留，之后照常能写。"""
+    """`job db reset` 的底座：删文件重建，旧数据一条不留，之后照常能写。"""
     context.jobs.upsert_many([make_job(1)], keyword="AI Agent")
     context.details.upsert(make_detail(1, description="JD"))
     context.applications.record(1, "ok", "应聘成功")

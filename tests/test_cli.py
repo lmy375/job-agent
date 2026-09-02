@@ -201,20 +201,20 @@ def test_db_info(config_path):
     assert run(config_path, "db", "info").exit_code == 0
 
 
-def test_reset_needs_confirmation(config_path, context):
+def test_db_reset_needs_confirmation(config_path, context):
     """删库不可撤销（投递记录只存在本地），默认必须确认一次。"""
     context.jobs.upsert_many([make_job(1)], keyword="AI Agent")
     context.applications.record(1, "ok", "应聘成功")
 
-    declined = run(config_path, "reset", input="n\n")
+    declined = run(config_path, "db", "reset", input="n\n")
     assert declined.exit_code != 0
     assert context.settings.storage.database.is_file()
     assert "投递记录删掉就找不回来了" in declined.stdout
 
 
-def test_reset_rebuilds_empty_db(config_path, context):
+def test_db_reset_rebuilds_empty_db(config_path, context):
     context.jobs.upsert_many([make_job(1)], keyword="AI Agent")
-    result = run(config_path, "reset", "--yes")
+    result = run(config_path, "db", "reset", "--yes")
     assert result.exit_code == 0
     assert "已重建空库" in result.stdout
 

@@ -174,8 +174,7 @@ job stats
 job web [--host H] [--port P] [--no-browser] [--skip-build]
 job profile list|new|use|path
 job config init|show|path [--json]|validate
-job reset [--yes]
-job db info|vacuum
+job db info|vacuum|reset [--yes]
 ```
 
 全局选项：`--profile/-p` 指定 profile、`--config` 指定全局配置文件、
@@ -412,9 +411,9 @@ uv run pytest tests/test_matching.py -v
 完整的 `config/` + `data/`，顺便验证了「换一个项目根目录也能跑」。
 
 **数据库不做迁移，接口不做向后兼容**（见 CLAUDE.md 硬规则）：库结构改了就
-`job reset` 删库重建，再 `job search` 重采一遍；接口字段改了就同步改
+`job db reset` 删库重建，再 `job search` 重采一遍；接口字段改了就同步改
 `frontend/`。这是个单人工具，数据随时能重新采集，为「万一有老库」写的兼容代码
 只会一直留在仓库里没人敢删。
 
-`job reset` 会把投递记录一并删掉——猎聘没有查询投递记录的接口，那张表是唯一的账本，
+`job db reset` 会把投递记录一并删掉——猎聘没有查询投递记录的接口，那张表是唯一的账本，
 所以它默认要确认一次。

@@ -10,7 +10,6 @@ from job_agent.cli.commands import (
     config_cmd,
     db_cmd,
     profile_cmd,
-    reset_cmd,
     resume_cmd,
     score_cmd,
     search_cmd,
@@ -35,10 +34,9 @@ def register(app: typer.Typer) -> None:
     )(agent_cmd.agent)
     app.command("stats", help="在终端查看库内数据概览。")(stats_cmd.stats)
     app.command("web", help="启动 Web 管理服务（数据浏览 + 采集任务 + 投递）。")(web_cmd.web)
-    app.command("reset", help="删掉数据库并重建空库（不做迁移，重采即可）。")(reset_cmd.reset)
     app.add_typer(
         profile_cmd.app, name="profile", help="管理 profile（一个人 / 一种求职场景）。"
     )
     app.add_typer(config_cmd.app, name="config", help="查看与初始化配置。")
     app.add_typer(resume_cmd.app, name="resume", help="简历文件导入。")
-    app.add_typer(db_cmd.app, name="db", help="数据库维护。")
+    app.add_typer(db_cmd.app, name="db", help="数据库维护（查看、回收空间、删库重建）。")
