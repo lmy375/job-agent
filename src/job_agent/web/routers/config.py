@@ -21,5 +21,4 @@ def get_config(context: ContextDep) -> ConfigResponse:
         # 密钥字段是 SecretStr，序列化成 JSON 时自动变 ``**********``
         settings=settings,
         paths=settings.paths(),
-        reportExists=settings.report.output.is_file(),
     )

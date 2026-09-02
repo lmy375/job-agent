@@ -107,8 +107,7 @@ def render_shortlist(
             f"- **公司**：{company}",
             f"- **薪资**：{row.salary or '未标'} → {_salary_cell(job)}",
             f"- **条件**：{conditions}",
-            f"- **赛道 / 角色**：{row.track or '—'} / {row.role or '—'}"
-            f" · 命中关键词「{row.keyword or '—'}」",
+            f"- **命中关键词**：{row.keyword or '—'}",
             f"- **匹配分**：{job.score:.0f}",
         ]
         if job.hits:

@@ -31,8 +31,7 @@ def search(
         typer.echo(f"将搜索 {len(todo)} 个关键词，每个最多 "
                    f"{pages or context.settings.search.max_pages} 页：")
         for item in todo:
-            track = context.settings.search.track_for_keyword(item) or "未归类"
-            typer.echo(f"  · {item}（{track}）")
+            typer.echo(f"  · {item}")
         return
 
     with context.client() as client:

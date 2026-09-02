@@ -104,8 +104,10 @@ class SalarySummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     parsed: int
+    #: 用来比较的门槛（万元/年，税前），来自当前 profile；没配门槛时为 None
+    floorWan: float | None = None
     #: 猎聘的薪资筛选是「区间重叠」而非「下限 ≥」，还会漏进明显不达标的条目，
-    #: 所以单独暴露真正够到 100 万的比例，避免误以为全部样本都是百万岗
-    meets100: int
-    meets100Pct: float
+    #: 所以单独暴露薪资上限真正够到门槛的比例，避免误以为全部样本都达标
+    meetsFloor: int = 0
+    meetsFloorPct: float = 0.0
     avgHighWan: float

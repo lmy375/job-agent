@@ -47,7 +47,6 @@ from job_agent.core.liepin.constants import (
 )
 from job_agent.core.liepin.enums import EduLevel, SalaryKind, WorkExperience
 from job_agent.errors import MissingTokenError
-from job_agent.tracks import TrackName
 
 
 class _Model(BaseModel):
@@ -96,13 +95,14 @@ class ProfileConfig(_Model):
 
 
 class KeywordGroup(_Model):
-    """一组同赛道的搜索关键词。
+    """一组搜索关键词。
 
-    ``track`` 除了给报告分组，还是分类兜底的依据：职位名看不出赛道时
-    （「技术专家」「负责人」这类），按关键词所属赛道 + JD 正文信号词判定。
+    ``track`` 只是这组关键词的**标签**，给人看的（配置里分组、Web 上展示），
+    程序不拿它做任何判断——赛道分类是分析，不在这个仓库里，见 CLAUDE.md
+    「不承担市场分析」一节。所以它是自由文本：写「前端」「数据」「Web3」都行。
     """
 
-    track: TrackName
+    track: str = Field(min_length=1)
     keywords: list[str] = Field(min_length=1)
     enabled: bool = True
 
@@ -153,21 +153,6 @@ class SearchConfig(_Model):
             for keyword in group.keywords:
                 seen.setdefault(keyword, None)
         return list(seen)
-
-    def track_for_keyword(self, keyword: str) -> str | None:
-        """关键词属于哪条赛道；未配置过的关键词返回 None。
-
-        禁用的组也参与匹配：库里存量数据的 searchKeyword 可能来自已关掉的组，
-        分类时仍然要认得它。
-        """
-        target = keyword.strip().lower()
-        if not target:
-            return None
-        for group in self.groups:
-            for configured in group.keywords:
-                if configured.strip().lower() == target:
-                    return group.track
-        return None
 
 
 class LiepinAccount(_Model):
@@ -343,11 +328,6 @@ class AgentConfig(_Model):
         return f"{self.provider} / {self.active.model}"
 
 
-class ReportConfig(_Model):
-    output: Path = Path("data/job-report.html")
-    insights_dir: Path = Path("insights")
-
-
 class WebConfig(_Model):
     host: str = "127.0.0.1"
     port: int = Field(default=18000, ge=1, le=65535)
@@ -433,7 +413,6 @@ class ProfileSettings(_FileSettings):
     search: SearchConfig = Field(default_factory=SearchConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
     match: MatchConfig = Field(default_factory=MatchConfig)
-    report: ReportConfig = Field(default_factory=ReportConfig)
 
 
 class Settings(BaseModel):
@@ -469,7 +448,6 @@ class Settings(BaseModel):
     search: SearchConfig
     storage: StorageConfig
     match: MatchConfig
-    report: ReportConfig
 
     @model_validator(mode="after")
     def _account_must_exist(self) -> Settings:
@@ -512,8 +490,6 @@ class Settings(BaseModel):
             preferences=self.profile.preferences,
             match=self.match.rules,
             shortlist=self.match.shortlist_output,
-            report=self.report.output,
-            insightsDir=self.report.insights_dir,
         )
 
 
@@ -536,5 +512,3 @@ class ConfigPaths(_Model):
     preferences: Path
     match: Path
     shortlist: Path
-    report: Path
-    insightsDir: Path

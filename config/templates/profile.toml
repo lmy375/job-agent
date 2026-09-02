@@ -37,6 +37,8 @@ max_pages = 6             # 每个关键词翻几页；服务端硬上限 6 页�
 # track 用于分类兜底：职位名看不出赛道时，按关键词所属赛道 + JD 正文信号词判定。
 # 取值必须是 AI / Web3 / 安全 / 后端 之一。
 
+# track 只是这组关键词的标签（给人看的分组名），程序不拿它做判断。
+# 写什么都行：前端、数据、Web3、你自己的方向名。
 [[search.groups]]
 track = "AI"
 keywords = ["AI Agent", "大模型", "AI应用", "AI平台", "LLM", "AI工程"]
@@ -70,10 +72,3 @@ shortlist_output = "data/shortlist.md"
 # 按上限而不是下限过滤：上限才代表「这家最多能给到多少」，
 # 按下限过滤会误杀「50-80k·20薪」这类实际能谈上去的岗位。
 # salary_floor_wan = 135.0
-
-# ---------------------------------------------------------------- 报告
-[report]
-output = "data/job-report.html"
-# 报告里的定性结论与简历建议（HTML 片段 + 匹配矩阵），可自行改写
-insights_dir = "insights"
-

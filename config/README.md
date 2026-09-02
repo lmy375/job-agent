@@ -8,18 +8,17 @@
 | `config.example.toml` | 全局配置模板，带完整注释 | ✅ |
 | `config.toml` | 你的全局配置（`job config init` 从模板生成）**，密钥也在里面** | ❌ |
 | `templates/` | 新建 profile 的模板，`job profile new` 整份拷成 `profiles/<名字>/` | ✅ |
-| `templates/profile.toml` | 搜索条件、关键词分组、匹配门槛、报告 | ✅ |
+| `templates/profile.toml` | 搜索条件、关键词分组、匹配门槛 | ✅ |
 | `templates/resume.md` | 简历模板（带「怎么写才对得上市场词汇」的提示） | ✅ |
 | `templates/preferences.md` | 求职偏好模板 | ✅ |
 | `templates/match.toml` | 匹配信号表模板（带完整注释与权重取法） | ✅ |
-| `templates/insights/` | 报告文案模板（HTML 片段 + 匹配矩阵） | ✅ |
 
 ## 两个文件，段名不重叠
 
 | 文件 | 段 |
 | --- | --- |
 | `config/config.toml` | `[profiles]`、`[liepin]`（含 `[liepin.accounts.*]`）、`[detail]`、`[agent]`（含 `.providers.*` / `.langsmith`）、`[web]`、`[logging]` |
-| `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[match]`、`[report]` |
+| `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[match]` |
 
 段放错文件会**当场报错**，并直接告诉你它该在哪个文件里。不重叠是刻意的：
 同一个段要是能出现在两处，下场一定是「改了一个忘了另一个」。

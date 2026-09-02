@@ -42,7 +42,6 @@ export const api = {
   config: () => request("/config"),
   keywords: () => request("/keywords"),
   stats: () => request("/stats"),
-  trackStats: () => request("/stats/tracks"),
   jobs: (params) => request(`/jobs${query(params)}`),
   job: (jobId) => request(`/jobs/${jobId}`),
   applyJob: (jobId, jobKind) =>

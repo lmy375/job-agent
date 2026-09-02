@@ -1,59 +1,48 @@
-"""``job stats``：终端里的数据概览。"""
+"""``job stats``：终端里的数据概览。
+
+**只报库存，不做分析**：库里有多少条、抓了多少 JD、投了多少、薪资什么水位。
+「这个市场在招什么方向、要什么技能」不在这里——那是分析，因人而异，
+归 skill 或用户自己的脚本（见 CLAUDE.md「不承担市场分析」一节）。
+"""
 
 from __future__ import annotations
-
-from typing import Annotated
 
 import typer
 
 from job_agent.cli.state import CliState
-from job_agent.core.analysis import analyze
 
 _TOP_KEYWORDS = 12
 
 
-def stats(
-    ctx: typer.Context,
-    tracks: Annotated[
-        bool, typer.Option("--tracks", help="额外跑一遍分类统计（较慢，需要已抓取的 JD）。")
-    ] = False,
-) -> None:
+def stats(ctx: typer.Context) -> None:
     state: CliState = ctx.obj
     context = state.context()
+    settings = context.settings
 
     total = context.jobs.count()
     details = context.details.status_counts()
     applications = context.applications.status_counts()
-    salary = context.jobs.salary_summary()
+    floor = settings.match.salary_floor_wan
+    salary = context.jobs.salary_summary(floor_wan=floor)
 
-    typer.secho(f"数据库：{context.settings.storage.database}", bold=True)
+    typer.secho(f"数据库：{settings.storage.database}", bold=True)
     typer.echo(f"  职位总数        {total}")
     typer.echo(f"  已抓详情        {sum(details.values())}  {_fmt(details)}")
     typer.echo(f"  投递记录        {sum(applications.values())}  {_fmt(applications)}")
-    typer.echo(
-        f"  薪资可解析      {salary.parsed}  其中上限 ≥100 万："
-        f"{salary.meets100}（{salary.meets100Pct}%）  平均上限 {salary.avgHighWan} 万"
-    )
-
-    typer.secho("\n按方向（searchKeyword）", bold=True)
-    for row in context.jobs.keyword_counts()[:_TOP_KEYWORDS]:
-        track = context.settings.search.track_for_keyword(row.keyword) or "未归类"
-        typer.echo(f"  {row.keyword:<16}{row.count:>6}   {track}")
-
-    if not tracks:
-        typer.echo("\n（加 --tracks 可看赛道 / 角色分布）")
-        return
-
-    typer.secho("\n赛道分布（按 JD 正文去重后）", bold=True)
-    data = analyze(context.db, context.settings)
-    typer.echo(f"  有效 JD 共 {data.total} 份")
-    for track, count in data.trackCounts.most_common():
-        info = data.tracks.get(track)
-        median = info.salaryMedianHigh if info else None
-        top_role = info.roles[0][0] if info and info.roles else "—"
+    if floor is not None:
         typer.echo(
-            f"  {track:<6}{count:>6}   中位上限 {median or '—'} 万   主要角色：{top_role}"
+            f"  薪资可解析      {salary.parsed}  其中上限 ≥{floor:.0f} 万："
+            f"{salary.meetsFloor}（{salary.meetsFloorPct}%）  平均上限 {salary.avgHighWan} 万"
         )
+    else:
+        typer.echo(
+            f"  薪资可解析      {salary.parsed}  平均上限 {salary.avgHighWan} 万"
+            "（[match].salary_floor_wan 没配，不报达标比例）"
+        )
+
+    typer.secho("\n按搜索关键词", bold=True)
+    for row in context.jobs.keyword_counts()[:_TOP_KEYWORDS]:
+        typer.echo(f"  {row.keyword:<16}{row.count:>6}")
 
 
 def _fmt(counts: dict[str, int]) -> str:

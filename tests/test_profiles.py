@@ -134,8 +134,6 @@ def test_two_profiles_get_separate_inputs_and_outputs(project_root, monkeypatch)
         lambda s: s.profile.preferences,
         lambda s: s.match.rules,
         lambda s: s.match.shortlist_output,
-        lambda s: s.report.output,
-        lambda s: s.report.insights_dir,
         lambda s: s.agent.checkpoint,
         lambda s: s.agent.plan_output,
     ):

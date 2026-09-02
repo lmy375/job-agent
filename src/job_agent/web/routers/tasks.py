@@ -7,14 +7,11 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException
 
 from job_agent.context import AppContext
-from job_agent.core.analysis import analyze
-from job_agent.core.report import build, load_insights
 from job_agent.core.services import DetailService, SearchService
 from job_agent.web.deps import ContextDep, TasksDep
 from job_agent.web.schemas import (
     CreateTaskRequest,
     DetailTaskResult,
-    ReportTaskResult,
     SearchKeywordResult,
     SearchTaskResult,
     TaskDetail,
@@ -132,33 +129,7 @@ def _detail_runner(
     return run
 
 
-def _report_runner(
-    payload: CreateTaskRequest, context: AppContext, manager: TaskManager
-) -> Callable[[Task], TaskResult]:
-    def run(task: Task) -> TaskResult:
-        hook = manager.progress_hook(task)
-        from job_agent.core.services import ProgressEvent
-
-        hook(ProgressEvent(message="正在统计 JD……"))
-        data = analyze(context.db, context.settings, dedupe=payload.params.dedupe)
-        if not data.total:
-            raise RuntimeError("没有可用的 JD，请先执行搜索与详情抓取")
-        insights = load_insights(context.settings.report.insights_dir)
-        hook(ProgressEvent(message=f"正在渲染报告（{data.total} 份有效 JD）……"))
-        path = build(data, context.settings, insights=insights)
-        hook(ProgressEvent(message=f"报告已生成：{path}"))
-        return ReportTaskResult(
-            path=str(path),
-            total=data.total,
-            tracks=dict(data.trackCounts),
-            warnings=insights.warnings,
-        )
-
-    return run
-
-
 _RUNNERS = {
     TaskKind.SEARCH: _search_runner,
     TaskKind.DETAIL: _detail_runner,
-    TaskKind.REPORT: _report_runner,
 }

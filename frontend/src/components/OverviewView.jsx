@@ -3,26 +3,15 @@ import { api } from "../api.js";
 
 export default function OverviewView() {
   const [stats, setStats] = useState(null);
-  const [tracks, setTracks] = useState(null);
   const [config, setConfig] = useState(null);
-  // /api/config 返回 { settings, paths, reportExists }：settings 就是脱敏后的配置树
+  // /api/config 返回 { settings, paths }：settings 就是脱敏后的配置树
   const settings = config?.settings;
   const [error, setError] = useState("");
-  const [loadingTracks, setLoadingTracks] = useState(false);
 
   useEffect(() => {
     api.stats().then(setStats).catch((e) => setError(e.message));
     api.config().then(setConfig).catch((e) => setError(e.message));
   }, []);
-
-  const loadTracks = () => {
-    setLoadingTracks(true);
-    api
-      .trackStats()
-      .then(setTracks)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoadingTracks(false));
-  };
 
   return (
     <>
@@ -32,11 +21,13 @@ export default function OverviewView() {
         <div className="stat-grid">
           <Stat value={stats.jobs} label="职位总数" />
           <Stat value={stats.details.ok || 0} label="已抓到 JD" note={`待抓 ${stats.pendingDetails} 条`} />
-          <Stat
-            value={`${stats.salary.meets100Pct}%`}
-            label="薪资上限真正 ≥100 万"
-            note={`${stats.salary.meets100}/${stats.salary.parsed} 条`}
-          />
+          {stats.salary.floorWan != null && (
+            <Stat
+              value={`${stats.salary.meetsFloorPct}%`}
+              label={`薪资上限真正 ≥${stats.salary.floorWan} 万`}
+              note={`${stats.salary.meetsFloor}/${stats.salary.parsed} 条`}
+            />
+          )}
           <Stat
             value={Object.values(stats.applications).reduce((a, b) => a + b, 0)}
             label="投递记录"
@@ -45,64 +36,6 @@ export default function OverviewView() {
               .join("  ")}
           />
         </div>
-      )}
-
-      <h3 className="section-title">
-        赛道分布
-        {!tracks && (
-          <button className="btn small" onClick={loadTracks} disabled={loadingTracks}>
-            {loadingTracks ? "统计中…" : "开始统计"}
-          </button>
-        )}
-      </h3>
-      {!tracks && (
-        <p className="muted">
-          需要把全部 JD 跑一遍分类规则，耗时数秒，结果会缓存到数据变化为止。
-        </p>
-      )}
-      {tracks && (
-        <>
-          <p className="muted">按 JD 正文去重后共 {tracks.total} 份有效 JD。</p>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>赛道</th>
-                  <th>JD 数</th>
-                  <th>年薪中位区间</th>
-                  <th>90 分位</th>
-                  <th>≥100 万占比</th>
-                  <th>主要角色</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tracks.tracks.map((t) => (
-                  <tr key={t.track}>
-                    <td>
-                      <b>{t.track}</b>
-                    </td>
-                    <td>{t.count}</td>
-                    <td className="salary">
-                      {t.salaryMedianLow ?? "—"}–{t.salaryMedianHigh ?? "—"} 万
-                    </td>
-                    <td>{t.salaryP90High ?? "—"} 万</td>
-                    <td>
-                      {t.salaryParsed
-                        ? `${Math.round((t.meets100 / t.salaryParsed) * 100)}%`
-                        : "—"}
-                    </td>
-                    <td className="sub">
-                      {t.roles
-                        .slice(0, 3)
-                        .map(([role, n]) => `${role}(${n})`)
-                        .join("、")}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
       )}
 
       {config && (
@@ -124,8 +57,7 @@ export default function OverviewView() {
                 <Row k="数据库" v={config.paths.database} />
                 <Row k="简历" v={config.paths.resume} />
                 <Row k="匹配信号表" v={config.paths.match} />
-                <Row k="报告输出" v={`${config.paths.report}${config.reportExists ? "" : "（尚未生成）"}`} />
-                <Row k="insights 素材" v={config.paths.insightsDir} />
+                <Row k="候选清单" v={config.paths.shortlist} />
                 <Row
                   k="猎聘账号"
                   v={`${settings.profile.account}（token ${

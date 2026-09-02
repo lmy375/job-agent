@@ -81,14 +81,6 @@ def test_keywords_flattened_in_priority_order(settings):
     assert settings.search.keywords == ["AI Agent", "大模型", "安全专家"]
 
 
-def test_track_lookup_includes_disabled_groups(settings):
-    """禁用的组仍要能查到赛道：库里存量数据的 searchKeyword 可能来自已关掉的组。"""
-    assert settings.search.track_for_keyword("AI Agent") == "AI"
-    assert settings.search.track_for_keyword("区块链") == "Web3"
-    assert settings.search.track_for_keyword("ai agent") == "AI"  # 大小写不敏感
-    assert settings.search.track_for_keyword("不存在的词") is None
-
-
 def test_unknown_key_is_rejected(project_root):
     """配置项拼错必须报错——静默忽略是配置系统最容易埋的坑。"""
     with pytest.raises(ConfigError, match="未知配置项"):
@@ -100,11 +92,12 @@ def test_salary_without_kind_is_rejected(project_root):
         load_with_profile(project_root, "[search]\nsalary_floor = 1000000\n")
 
 
-def test_bad_track_name_is_rejected(project_root):
-    with pytest.raises(ConfigError):
-        load_with_profile(
-            project_root, '[[search.groups]]\ntrack = "量子计算"\nkeywords = ["x"]\n'
-        )
+def test_any_track_label_is_accepted(project_root):
+    """track 只是分组标签，不再是四选一的赛道枚举——换个方向的人不用改代码。"""
+    settings = load_with_profile(
+        project_root, '[[search.groups]]\ntrack = "量子计算"\nkeywords = ["x"]\n'
+    )
+    assert settings.search.groups[0].track == "量子计算"
 
 
 def test_missing_config_file(tmp_path):

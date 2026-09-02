@@ -15,11 +15,11 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from job_agent.context import AppContext
-from job_agent.core.analysis import load_rows
+from job_agent.core.dataset import load_rows
 from job_agent.core.storage import JobQuery
 from job_agent.core.storage.repositories import MAX_PAGE_SIZE
 
-#: 注意：``--with-jd`` 走的是分析行（AnalysisRow），它把这几列叫 salaryLow /
+#: 注意：``--with-jd`` 走的是事实行（JobFacts），它把这几列叫 salaryLow /
 #: salaryHigh / keyword / url，字段名对不上，所以那几列会导成空——
 #: 这是从 dict 时代就有的行为，迁移到 model 时按原样保留了。
 CSV_FIELDS = (
@@ -59,7 +59,7 @@ def main() -> None:
 
     rows: list[BaseModel]
     if args.with_jd:
-        rows = list(load_rows(context.db, context.settings))
+        rows = list(load_rows(context.db))
     else:
         rows = []
         offset = 0

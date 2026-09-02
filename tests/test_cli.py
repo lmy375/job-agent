@@ -41,7 +41,7 @@ def test_version():
 def test_help_lists_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("search", "detail", "apply", "report", "stats", "web", "config", "db"):
+    for command in ("search", "detail", "apply", "stats", "web", "config", "db"):
         assert command in result.stdout
 
 
@@ -106,7 +106,6 @@ def test_profile_new_copies_templates_and_sets_default(fresh_root):
     assert result.exit_code == 0
     for name in ("profile.toml", "resume.md", "preferences.md", "match.toml"):
         assert (fresh_root / "profiles" / "me" / name).is_file(), name
-    assert (fresh_root / "profiles" / "me" / "insights" / "ai.html").is_file()
     assert (fresh_root / "profiles" / "me" / "data").is_dir()
     # 第一个 profile 自动成为默认，不带 --profile 也能跑
     assert 'default = "me"' in (fresh_root / "config" / "config.toml").read_text(encoding="utf-8")
@@ -136,7 +135,7 @@ def test_profiles_are_isolated(fresh_root):
         paths[name] = json.loads(result.stdout)
 
     assert paths["a"]["database"] != paths["b"]["database"]
-    for key in ("database", "resume", "match", "report", "insightsDir"):
+    for key in ("database", "resume", "match", "shortlist"):
         assert "profiles/a" in paths["a"][key], key
         assert "profiles/b" in paths["b"][key], key
 
@@ -160,7 +159,7 @@ def test_search_dry_run_does_not_hit_network(config_path, monkeypatch):
     monkeypatch.setattr(AppContext, "client", lambda _self: pytest.fail("dry-run 不该建客户端"))
     result = run(config_path, "search", "--dry-run")
     assert result.exit_code == 0
-    assert "AI Agent（AI）" in result.stdout
+    assert "AI Agent" in result.stdout
 
 
 def test_db_info(config_path):
@@ -188,21 +187,6 @@ def test_reset_rebuilds_empty_db(config_path, context):
     fresh = Database(context.settings.storage.database).setup()
     assert JobRepository(fresh).count() == 0
     fresh.dispose()
-
-
-def test_report_without_data_exits_nonzero(config_path):
-    result = run(config_path, "report")
-    assert result.exit_code == 1
-    assert "没有可用的 JD" in result.stdout
-
-
-def test_report_generates_file(config_path, context, insights_dir, tmp_path):
-    context.jobs.upsert_many([make_job(1, salary="80-100k·15薪")], keyword="AI Agent")
-    context.details.upsert(make_detail(1, description=AI_JD))
-    output = tmp_path / "r.html"
-    result = run(config_path, "report", "-o", str(output))
-    assert result.exit_code == 0
-    assert output.is_file()
 
 
 def test_apply_requires_confirmation(config_path, context, monkeypatch):

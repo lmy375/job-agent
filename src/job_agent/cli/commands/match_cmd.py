@@ -30,8 +30,6 @@ class MatchJson(BaseModel):
     industry: str
     workYears: str
     education: str
-    track: str
-    role: str
     keyword: str
     dupes: int
     url: str
@@ -133,8 +131,6 @@ def _as_json(job: ScoredJob) -> MatchJson:
         industry=row.industry,
         workYears=row.workYears,
         education=row.education,
-        track=row.track,
-        role=row.role,
         keyword=row.keyword,
         dupes=row.dupes,
         url=row.url,

@@ -132,10 +132,18 @@ def test_keyword_counts_and_salary_summary(context):
     counts = {row.keyword: row.count for row in context.jobs.keyword_counts()}
     assert counts == {"AI Agent": 1, "安全专家": 1}
 
-    summary = context.jobs.salary_summary()
+    # 门槛由调用方传入——「多少算达标」因人而异，不写死在仓储里
+    summary = context.jobs.salary_summary(floor_wan=100)
     assert summary.parsed == 2
-    assert summary.meets100 == 1
-    assert summary.meets100Pct == 50.0
+    assert summary.floorWan == 100
+    assert summary.meetsFloor == 1
+    assert summary.meetsFloorPct == 50.0
+
+    # 没给门槛就只报可解析条数与均值，不假装有个达标线
+    plain = context.jobs.salary_summary()
+    assert plain.parsed == 2
+    assert plain.floorWan is None
+    assert plain.meetsFloor == 0
 
 
 def test_reset_drops_and_recreates(context):

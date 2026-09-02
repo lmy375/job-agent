@@ -3,7 +3,6 @@
     job search                 按配置的关键词批量搜索职位入库
     job detail                 抓取职位详情页并解析 JD
     job apply <jobId>...       投递职位
-    job report                 生成 HTML 市场分析报告
     job stats                  在终端看一眼库里现在有什么
     job web                    启动 Web 管理服务
     job reset                  删库重建（结构变了就重来，不做迁移）

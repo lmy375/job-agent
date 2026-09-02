@@ -81,7 +81,7 @@ def show(
     typer.echo(f"猎聘账号：{settings.profile.account}（token {token_state}）")
     for section in (
         "profiles", "profile", "search", "liepin", "detail", "storage",
-        "match", "agent", "report", "web", "logging",
+        "match", "agent", "web", "logging",
     ):
         block = getattr(settings, section)
         typer.secho(f"\n[{section}]", fg=typer.colors.CYAN)
@@ -138,8 +138,6 @@ def path(
     typer.echo(f"preferences  {settings.profile.preferences}")
     typer.echo(f"match        {settings.match.rules}")
     typer.echo(f"shortlist    {settings.match.shortlist_output}")
-    typer.echo(f"insights     {settings.report.insights_dir}")
-    typer.echo(f"report       {settings.report.output}")
 
 
 @app.command("validate", help="校验配置是否可用（含 token、简历、素材是否就位）。")
@@ -176,10 +174,6 @@ def validate(ctx: typer.Context) -> None:
             load_rules(settings.match.rules)
         except ConfigError as exc:
             problems.append(str(exc))
-    if not settings.report.insights_dir.is_dir():
-        problems.append(
-            f"insights 目录不存在：{settings.report.insights_dir}（报告将只有定量部分）"
-        )
 
     for problem in problems:
         echo_warn(problem)

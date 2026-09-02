@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-from job_agent.core.analysis import norm_years
 from job_agent.core.salary import parse_salary
 
 
@@ -28,21 +27,3 @@ def test_parse_salary(text, low, high):
 @pytest.mark.parametrize("text", ["面议", "", None, "薪资保密", "20k"])
 def test_parse_salary_unparseable(text):
     assert parse_salary(text) is None
-
-
-@pytest.mark.parametrize(
-    ("text", "expected"),
-    [
-        ("经验不限", "经验不限"),
-        ("", "经验不限"),
-        ("应届毕业生", "经验不限"),  # 抽不出数字，归入不限
-        ("1-3年", "1-3 年"),
-        ("2年以上", "1-3 年"),
-        ("3-5年", "3-5 年"),
-        ("7年以上", "5-10 年"),
-        ("10年以上", "10 年以上"),
-        ("2-8年", "1-3 年"),  # 按起始年限归档
-    ],
-)
-def test_norm_years(text, expected):
-    assert norm_years(text) == expected

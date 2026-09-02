@@ -190,22 +190,32 @@ class JobRepository:
                 PendingDetail(jobId=jid, jobDetailUrl=url) for jid, url in s.execute(stmt)
             ]
 
-    def salary_summary(self) -> SalarySummary:
-        """整库薪资概览（万元）。薪资解析不出来的行不计入。"""
+    def salary_summary(self, floor_wan: float | None = None) -> SalarySummary:
+        """整库薪资概览（万元）。薪资解析不出来的行不计入。
+
+        ``floor_wan`` 是拿来比的门槛，由调用方从当前 profile 传进来——
+        「多少算达标」因人而异，不该写死在仓储里。
+        """
         with self.db.session() as s:
             parsed = s.scalar(
                 select(func.count()).select_from(JobRecord).where(
                     JobRecord.salaryHighWan.is_not(None)
                 )
             ) or 0
-            meets_100 = s.scalar(
-                select(func.count()).select_from(JobRecord).where(JobRecord.salaryHighWan >= 100)
-            ) or 0
+            meets = (
+                s.scalar(
+                    select(func.count())
+                    .select_from(JobRecord)
+                    .where(JobRecord.salaryHighWan >= floor_wan)
+                )
+                or 0
+            ) if floor_wan is not None else 0
             avg_high = s.scalar(select(func.avg(JobRecord.salaryHighWan))) or 0.0
         return SalarySummary(
             parsed=parsed,
-            meets100=meets_100,
-            meets100Pct=round(meets_100 / parsed * 100, 1) if parsed else 0.0,
+            floorWan=floor_wan,
+            meetsFloor=meets,
+            meetsFloorPct=round(meets / parsed * 100, 1) if parsed and floor_wan else 0.0,
             avgHighWan=round(float(avg_high), 1),
         )
 

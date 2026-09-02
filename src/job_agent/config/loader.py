@@ -57,8 +57,6 @@ _PROFILE_PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("storage", "database"),
     ("match", "rules"),
     ("match", "shortlist_output"),
-    ("report", "output"),
-    ("report", "insights_dir"),
     ("agent", "checkpoint"),
     ("agent", "plan_output"),
 )
@@ -285,7 +283,6 @@ def load_settings(
             search=profile_settings.search,
             storage=profile_settings.storage,
             match=profile_settings.match,
-            report=profile_settings.report,
         )
     except ValidationError as exc:
         raise ConfigError(_format_validation_error(exc, config_file, frozenset(), "")) from exc

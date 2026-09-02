@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -84,10 +83,6 @@ database = "data/test.db"
 [match]
 rules = "match.toml"
 shortlist_output = "data/shortlist.md"
-
-[report]
-output = "data/report.html"
-insights_dir = "insights"
 """
 
 #: 测试用的 profile 名。夹具都用它，不用 "default"——
@@ -161,18 +156,6 @@ def context(settings: Settings) -> Iterator[AppContext]:
     ctx = AppContext.from_settings(settings)
     yield ctx
     ctx.close()
-
-
-@pytest.fixture
-def insights_dir(profile_dir: Path) -> Path:
-    """把仓库里的 insights 模板复制进测试 profile。
-
-    用 ``config/templates/insights``（进版本库）而不是用户自己的 profile
-    （不进版本库），这样新克隆下来测试也能跑，顺带验证模板本身始终可解析。
-    """
-    target = profile_dir / "insights"
-    shutil.copytree(REPO_ROOT / "config" / "templates" / "insights", target)
-    return target
 
 
 def make_job(job_id: int = 1, **overrides: object) -> Job:

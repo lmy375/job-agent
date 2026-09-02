@@ -1,7 +1,7 @@
 """Web API 的请求 / 响应模型。带上它们，``/docs`` 才是能照着调的文档。
 
 响应一律是模型而不是现拼的 dict：字段拼错会在这里就炸，而不是等前端渲染出空白。
-能直接复用内核的行模型（``JobRow`` / ``ApplicationRow`` / ``SkillStat`` …）就复用，
+能直接复用内核的行模型（``JobRow`` / ``ApplicationRow`` / ``KeywordCount`` …）就复用，
 Web 端只在需要额外字段时继承它们——两处各写一份字段表，迟早会对不上。
 """
 
@@ -14,10 +14,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 from job_agent.config import ConfigPaths, Settings
-from job_agent.core.analysis import SkillStat
 from job_agent.core.storage import ApplicationRow, JobRow, KeywordCount, SalarySummary
 from job_agent.core.storage.repositories import MAX_PAGE_SIZE
-from job_agent.tracks import Track
 
 
 class JobListResponse(BaseModel):
@@ -27,14 +25,10 @@ class JobListResponse(BaseModel):
     jobs: list[JobRow]
 
 
-class KeywordStat(KeywordCount):
-    """某个搜索方向的职位数，附上它在配置里归属的赛道。"""
-
-    track: Track | None = Field(default=None, description="配置里这个关键词所属的赛道")
-
-
 class KeywordsResponse(BaseModel):
-    keywords: list[KeywordStat]
+    """各搜索关键词的职位数。纯库存计数，不带任何赛道 / 分类判断。"""
+
+    keywords: list[KeywordCount]
 
 
 class ApplyRequest(BaseModel):
@@ -75,27 +69,6 @@ class OverviewResponse(BaseModel):
     pendingDetails: int = Field(description="还没抓过详情的职位数")
 
 
-class TrackSummary(BaseModel):
-    """一条赛道的统计摘要。只保留能塞进 JSON 的部分——原始行含 JD 全文，不外传。"""
-
-    track: Track
-    count: int
-    roles: list[tuple[str, int]]
-    salaryMedianLow: float | None = None
-    salaryMedianHigh: float | None = None
-    salaryP90High: float | None = None
-    meets100: int
-    salaryParsed: int
-    topCompanies: list[tuple[str, int]]
-    workYears: list[tuple[str, int]]
-    topSkills: dict[str, list[SkillStat]]
-
-
-class TrackStatsResponse(BaseModel):
-    total: int
-    tracks: list[TrackSummary]
-
-
 class HealthResponse(BaseModel):
     status: str
     version: str
@@ -117,13 +90,11 @@ class ConfigResponse(BaseModel):
 
     settings: Settings
     paths: ConfigPaths
-    reportExists: bool
 
 
 class TaskKind(StrEnum):
     SEARCH = "search"
     DETAIL = "detail"
-    REPORT = "report"
 
 
 class TaskStatus(StrEnum):
@@ -145,7 +116,6 @@ class TaskParams(BaseModel):
         default=None, ge=1, le=MAX_PAGE_SIZE, description="仅 detail：本次最多抓多少条"
     )
     retry_failed: bool = Field(default=False, description="仅 detail：重试此前失败的")
-    dedupe: bool = Field(default=True, description="仅 report：是否按 JD 正文去重")
 
 
 class CreateTaskRequest(BaseModel):
@@ -191,13 +161,6 @@ class DetailTaskResult(TaskResult):
     statuses: dict[str, int]
     elapsedSeconds: float
     abortedReason: str | None = None
-
-
-class ReportTaskResult(TaskResult):
-    path: str
-    total: int
-    tracks: dict[str, int]
-    warnings: list[str] = Field(default_factory=list)
 
 
 class TaskView(BaseModel):

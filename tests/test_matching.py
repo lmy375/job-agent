@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from conftest import make_detail, make_job
-from job_agent.core.analysis import AnalysisRow
+from job_agent.core.dataset import JobFacts
 from job_agent.core.matching import (
     MatchRules,
     load_rules,
@@ -90,8 +90,8 @@ def rules_of(*signals: tuple[str, float, str], require: str | None = None) -> Ma
     return MatchRules.model_validate(data)
 
 
-def row(title: str = "工程师", description: str = "") -> AnalysisRow:
-    return AnalysisRow(jobId=1, jobName=title, company="某公司", description=description)
+def row(title: str = "工程师", description: str = "") -> JobFacts:
+    return JobFacts(jobId=1, jobName=title, company="某公司", description=description)
 
 
 def test_title_hit_is_doubled():

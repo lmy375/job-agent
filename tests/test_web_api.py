@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import time
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,23 +77,21 @@ def test_job_detail_and_404(client, seeded):
     assert "不在数据库" in missing.json()["detail"]
 
 
-def test_keywords_include_track(client, seeded):
+def test_keywords_are_plain_counts(client, seeded):
+    """只数条数，不带赛道——分类是分析，不在这个仓库里。"""
     keywords = client.get("/api/keywords").json()["keywords"]
     assert keywords[0]["keyword"] == "AI Agent"
-    assert keywords[0]["track"] == "AI"
+    assert "track" not in keywords[0]
 
 
-def test_stats_and_tracks(client, seeded):
+def test_stats_is_inventory_only(client, seeded):
     stats = client.get("/api/stats").json()
     assert stats["jobs"] == 2
     assert stats["details"] == {"ok": 1}
     assert stats["pendingDetails"] == 1
 
-    tracks = client.get("/api/stats/tracks").json()
-    assert tracks["total"] == 1
-    assert tracks["tracks"][0]["track"] == "AI"
-    # JD 全文不该被塞进统计响应里
-    assert "rows" not in tracks
+    # 赛道 / 技能分布这类市场分析已经不提供了
+    assert client.get("/api/stats/tracks").status_code == 404
 
 
 def test_config_masks_secrets(client):
@@ -160,33 +157,9 @@ def test_apply_unknown_job_is_400(client, monkeypatch):
     assert "不在数据库" in response.json()["detail"]
 
 
-def test_report_task_lifecycle(client, seeded, insights_dir):
-    created = client.post("/api/tasks", json={"kind": "report"})
-    assert created.status_code == 202
-    task_id = created.json()["task"]["id"]
-
-    for _ in range(50):
-        task = client.get(f"/api/tasks/{task_id}").json()["task"]
-        if task["status"] in ("succeeded", "failed", "cancelled"):
-            break
-        time.sleep(0.1)
-
-    assert task["status"] == "succeeded", task
-    assert task["result"]["total"] == 1
-    assert task["logs"]
-    assert client.get("/api/tasks").json()["tasks"][0]["id"] == task_id
-
-
-def test_report_task_fails_without_jd(client):
-    created = client.post("/api/tasks", json={"kind": "report"})
-    task_id = created.json()["task"]["id"]
-    for _ in range(50):
-        task = client.get(f"/api/tasks/{task_id}").json()["task"]
-        if task["status"] in ("succeeded", "failed"):
-            break
-        time.sleep(0.1)
-    assert task["status"] == "failed"
-    assert "没有可用的 JD" in task["error"]
+def test_report_task_kind_is_gone(client):
+    """报告任务已删除：只剩采集类任务。"""
+    assert client.post("/api/tasks", json={"kind": "report"}).status_code == 422
 
 
 def test_search_task_requires_token(client, context, monkeypatch):
@@ -205,5 +178,5 @@ def test_unknown_task_kind_is_422(client):
     assert client.post("/api/tasks", json={"kind": "danceoff"}).status_code == 422
 
 
-def test_report_endpoint_404_before_generation(client):
+def test_report_endpoint_is_gone(client):
     assert client.get("/report").status_code == 404

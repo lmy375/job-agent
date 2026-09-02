@@ -50,9 +50,3 @@ class StorageError(JobAgentError):
     """数据库不可用或迁移失败。"""
 
     exit_code = 3
-
-
-class ReportError(JobAgentError):
-    """报告渲染失败，通常是 profile 的 insights/ 下的素材缺失。"""
-
-    exit_code = 4

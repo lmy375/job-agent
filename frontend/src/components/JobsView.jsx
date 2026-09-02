@@ -11,7 +11,7 @@ const COLUMNS = [
   { key: "salary", label: "薪资" },
   { key: "education", label: "学历" },
   { key: "workYears", label: "经验" },
-  { key: "searchKeyword", label: "方向" },
+  { key: "searchKeyword", label: "搜索关键词" },
 ];
 
 const ORDERS = [
@@ -157,7 +157,6 @@ export default function JobsView() {
             key={k.keyword}
             className={filters.keyword === k.keyword ? "chip active" : "chip"}
             onClick={() => update({ keyword: k.keyword })}
-            title={k.track ? `赛道：${k.track}` : "未在配置里归类"}
           >
             {k.keyword} <span className="count">{k.count}</span>
           </button>

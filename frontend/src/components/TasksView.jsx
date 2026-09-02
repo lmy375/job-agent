@@ -12,7 +12,7 @@ const STATUS_LABEL = {
   cancelled: "已取消",
 };
 
-const KIND_LABEL = { search: "搜索职位", detail: "抓取详情", report: "生成报告" };
+const KIND_LABEL = { search: "搜索职位", detail: "抓取详情" };
 
 export default function TasksView() {
   const [tasks, setTasks] = useState([]);
@@ -134,19 +134,6 @@ export default function TasksView() {
           <button className="btn" onClick={() => submit("detail")}>
             开始抓取
           </button>
-        </section>
-
-        <section className="panel">
-          <h3>生成报告</h3>
-          <p className="muted">
-            按赛道统计已抓到的 JD，套用当前 profile 的 insights/ 文字素材，生成自包含 HTML 报告。
-          </p>
-          <button className="btn" onClick={() => submit("report")}>
-            生成报告
-          </button>
-          <a className="btn ghost" href="/report" target="_blank" rel="noreferrer">
-            查看最近一份报告
-          </a>
         </section>
       </div>
 

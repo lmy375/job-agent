@@ -8,7 +8,7 @@
 > 由此确定分工——**CLI 负责确定性，skill 负责判断**：
 >
 > - **CLI**（本仓库代码）承担一切可重跑、可测试、结果可比的环节：
->   采集、限流退避、去重、JD 解析、薪资换算、按规则打分排序、生成报告。
+>   采集、限流退避、去重、JD 解析、薪资换算、按规则打分排序。
 >   同样的库跑两次，结论必须一样。
 > - **Skill**（`.claude/skills/`）承担需要语言理解、代码穷举不出来的环节：
 >   读 JD 判断硬门槛冲突、比对简历措辞与市场词汇、排投递优先级、准备面试口径。
@@ -18,8 +18,12 @@
 > 判断一个新功能该不该加、加在哪，就用这三条对照：
 > 结论必须稳定复现的 → CLI；需要读懂文字才能下判断的 → skill；随人而变的 → profile。
 
-猎聘职位工具链：批量搜索 → 抓取详情页 JD → 赛道 / 技能统计 → 生成 HTML 市场报告 → 投递，
+猎聘职位工具链：批量搜索 → 抓取详情页 JD → 按你自己的信号表打分分诊 → 投递，
 数据全部落在本地 SQLite。提供 **CLI** 与 **Web 管理台**两套入口。
+
+**它不做市场分析。** 「这个方向在招什么、要什么技能」不是这个仓库的功能——
+那件事太因人而异，固定的切法只对写它的人有用（详见 CLAUDE.md「不承担市场分析」）。
+仓库只负责把事实准备好：去重、薪资换算、按你的 `match.toml` 排序。
 
 运行按 **profile** 隔离：**一个 profile = 一个人，或者一种求职场景**
 （「AI 应用工程」和「Web3 安全」可以是两个 profile）。每个 profile 是一个自包含的目录，
@@ -34,7 +38,6 @@ uv run job search            # 采集职位
 uv run job detail            # 抓 JD
 uv run job match             # 按信号表给职位打分排序（分诊）
 uv run job shortlist         # 生成候选清单骨架
-uv run job report            # 出报告
 uv run job web               # 打开 Web 管理台
 ```
 
@@ -57,7 +60,7 @@ uv run job profile use web3  # 把它设成默认，之后不用每次带 -p
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
 job search → job detail → job match → job shortlist → /job-match → job apply
-                       ↘ job report / job web （看市场大盘）
+                       ↘ job web （翻 JD、看库存、点投递）
 ```
 
 ## 目录结构
@@ -69,31 +72,28 @@ config/                跟人无关的那一半
   templates/           新建 profile 的模板，整份拷成一个新 profile（进版本库）
 profiles/              随人而变的那一半，整个目录不进版本库
   <名字>/               一个 profile = 一个人 / 一种求职场景，自包含
-    profile.toml       搜索条件、关键词分组、匹配门槛、报告
+    profile.toml       搜索条件、关键词分组、匹配门槛
     resume.md          你的简历
     preferences.md     求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
     match.toml         匹配信号表：正负信号 + 权重（决定 job match 的排序）
-    insights/          报告里的定性结论（HTML 片段 + 匹配矩阵）
-    data/              jobs.db、shortlist.md、job-report.html、agent-plan.md
+    data/              jobs.db、shortlist.md、agent-plan.md
 src/job_agent/
   config/              配置加载与校验（TOML → 校验过的 Settings，密钥是 SecretStr）
   core/                核心能力，不依赖 CLI / Web
     liepin/            猎聘接口客户端（限速、错误码翻译、请求模型）
     storage/           SQLite：ORM 模型、仓储、轻量迁移
     services/          用例编排：search / detail / apply（带进度回调与取消）
-    analysis/          赛道分类、技能词典、统计聚合
     matching/          按信号表打分排序 + 候选清单骨架（只分诊，不下结论）
     resume/            PDF / DOCX / TXT 简历 → 纯文本
-    report/            HTML 报告渲染 + insights 素材加载
+    dataset.py         jobs × job_details → 打分用的行集合（去重、薪资换算）
     jd_parser.py       详情页 → 结构化 JD（纯函数）
     salary.py          薪资文本 → 年薪区间（万元，税前）
   cli/                 typer 子命令（执行路线一：人或 skill 驱动）
   web/                 FastAPI 管理后端 + 后台任务
   agent/               LangGraph 独立执行（执行路线二，装 --extra agent 才可用）
 frontend/              React（Vite）管理台，构建到 frontend/dist 由后端托管
-scripts/               一次性分析脚本（改分类规则时用来核对）
+scripts/               一次性脚本（导出、关键词覆盖率核对）
 tests/                 pytest（不碰真实库、不发网络请求）
-data/                  jobs.db、生成的报告
   shortlist.md         job shortlist 的产物：候选清单（判断部分留白给 skill 填）
 .claude/skills/
   job-init/            `/job-init`：交互式收集信息并填好 config/
@@ -112,21 +112,19 @@ data/                  jobs.db、生成的报告
 | 文件 | 管什么 | 段 |
 | --- | --- | --- |
 | `config/config.toml` | **怎么连**，跟人无关，全局一份 | `[profiles]`、`[liepin]`、`[detail]`、`[agent]`、`[web]`、`[logging]` |
-| `profiles/<名>/profile.toml` | **找什么**，随人而变，一个 profile 一份 | `[profile]`、`[search]`、`[storage]`、`[match]`、`[report]` |
+| `profiles/<名>/profile.toml` | **找什么**，随人而变，一个 profile 一份 | `[profile]`、`[search]`、`[storage]`、`[match]` |
 
 - `config/config.toml`：全部密钥都在这（猎聘 token、模型 API key、LangSmith key）。
   它不进版本库，所以密钥直接填在里面；每一项都有注释，见 `config/config.example.toml`。
   猎聘 token 填在 `[liepin.accounts.<账号名>].user_token`，前往
   <https://www.liepin.com/mcp/auth> 生成。可以同时放几个人的账号，
   profile 用 `[profile].account` 指一个——换人不用来回重贴 token。
-- `profiles/<名>/profile.toml`：搜索条件、关键词分组、匹配门槛、报告输出。
+- `profiles/<名>/profile.toml`：搜索条件、关键词分组、匹配门槛。
   里面的相对路径都相对于**这个 profile 的目录**，所以两个 profile 的
   `data/jobs.db` 是两个库。
 - `profiles/<名>/resume.md`、`preferences.md`：你的简历与求职偏好。程序不解析它们，
-  刻意保持自由格式 Markdown——它们是写报告「给我的建议」章节、挑岗位、
-  准备面试问答时的输入。`/job-init` 会带你写；模板见 `config/templates/`。
-- `profiles/<名>/insights/`：报告里的文字结论，`job profile new` 会带一份模板过来。
-  素材缺失不会让报告失败——定量部分照样出，只是少了文字解读。
+  刻意保持自由格式 Markdown——它们是挑岗位、准备面试问答时的输入。
+  `/job-init` 会带你写；模板见 `config/templates/`。
 - 用哪个 profile：`--profile` → `JOB_AGENT_PROFILE_NAME` → `[profiles].default`
   → 只有一个 profile 时就是它 → 报错列出候选。有两个及以上又没说用哪个时**绝不猜**。
   （环境变量刻意不叫 `JOB_AGENT_PROFILE`：那个名字会被 pydantic-settings
@@ -146,9 +144,10 @@ data/                  jobs.db、生成的报告
 结果搜出一堆不达标的岗位却毫无提示）。
 
 关键词按数组顺序（= 优先级）搜索。因为按 jobId 去重且先搜高优先级方向，
-每条职位记录到的 `searchKeyword` 就是「最先命中它的方向」，它同时是分类兜底的依据。
-不再搜索但库里有存量数据的关键词，请保留在配置里并设 `enabled = false`：
-**否则这些职位会因为查不到赛道而整片掉进「其他」**。
+每条职位记录到的 `searchKeyword` 就是「最先命中它的方向」。
+不想再搜某个方向时，把那组设 `enabled = false` 即可（比删掉好：留着能看出
+库里存量数据是怎么来的）。`[[search.groups]].track` 只是分组标签，
+写「前端」「数据」还是「量子计算」都行——程序不拿它做任何判断。
 
 ## 初始化：`/job-init`
 
@@ -170,7 +169,6 @@ job match [--floor 万] [--top N] [--why] [--json] [--no-dedupe]
 job shortlist [-o 输出路径] [--limit N] [--floor 万]
 job resume import <文件> [-o 输出路径] [--force]
 job apply <jobId>... [--job-kind 1|2] [--yes]
-job report [-o 输出路径] [--no-dedupe]
 job stats [--tracks]
 job web [--host H] [--port P] [--no-browser] [--skip-build]
 job profile list|new|use|path
@@ -185,7 +183,7 @@ job db info|vacuum
 `job config path --json` 打印当前 profile 解析好的全部路径（简历、信号表、数据库…），
 skill 与外部脚本靠它定位文件——路径随 profile 变，不该在别处硬编码。
 
-退出码：`2` 配置/鉴权问题、`3` 存储、`4` 报告、`5` 接口错误或简历抽取失败、`6` 触发限流。
+退出码：`2` 配置/鉴权问题、`3` 存储、`5` 接口错误或简历抽取失败、`6` 触发限流。
 脚本里可以据此判断「今天别再投了」。
 
 `job apply` 默认会列出待投职位并要求确认（`--yes` 跳过）。投递结果（含「已投递过」
@@ -206,7 +204,7 @@ uv run job shortlist --limit 12       # 写出 <profile>/data/shortlist.md（判
 编码的是「你想要什么」，换个人应当整份重写：
 
 ```toml
-[require]                     # 职位名与 JD 都不含这些词 = 连赛道都不对，压到末尾
+[require]                     # 职位名与 JD 都不含这些词 = 连方向都不对，压到末尾
 pattern = '\bagent\b|智能体|大模型'
 penalty = -20.0
 
@@ -340,9 +338,9 @@ uv run job resume import 简历.docx -o /tmp/resume.txt
 
 `job web` 启动后（默认 <http://127.0.0.1:18000>）提供三个页面：
 
-- **职位**：分页、按方向/薪资/是否有 JD/是否投递筛选、展开看 JD 全文、一键投递（有二次确认）
-- **采集任务**：在页面上发起搜索 / 抓详情 / 生成报告，实时看进度与日志，可取消
-- **数据概览**：库内统计、赛道分布（结果缓存）、当前配置与路径
+- **职位**：分页、按关键词/薪资/是否有 JD/是否投递筛选、展开看 JD 全文、一键投递（有二次确认）
+- **采集任务**：在页面上发起搜索 / 抓详情，实时看进度与日志，可取消
+- **数据概览**：库存计数、薪资水位、当前配置与路径
 
 API 文档在 `/docs`。后台任务**只有一个 worker**：猎聘限流按 token 记账，
 并行只会更快被封；SQLite 的写也不适合并发。取消是协作式的——
@@ -363,33 +361,25 @@ JD 来自详情页里的 `<script type="application/ld+json">` **JobPosting** �
 单请求本身耗时 2–4s，天然限速到约 15 次/分钟。累计 2000+ 条实测全程无限流；
 失败的基本是已下线职位，记为 `no_jd`。进度直接落库，中断后重跑自动跳过已完成项。
 
-## 分析口径（几个必须知道的坑）
+## 取数口径（几个必须知道的坑）
 
-- **猎聘的薪资筛选是「区间重叠」而不是「下限 ≥ 100 万」**，还会漏进明显不达标的条目
-  （样本里出现过实习生岗）。当前样本只有 84% 的结果薪资上限真正够到 100 万，
-  各赛道差异很大（安全 95%、AI 86%、后端 73%）。统计里单独用 `meets100` 暴露这个比例，
-  报告里的总比例是实算的、不写死。
+这一节只剩「取数」——赛道分类、技能词典那些**分析**口径已经随
+`core/analysis/` 一起删除了（理由见 CLAUDE.md「不承担市场分析」）。
+
+- **猎聘的薪资筛选是「区间重叠」而不是「下限 ≥ 门槛」**，还会漏进明显不达标的条目
+  （样本里出现过实习生岗）。所以 `job stats` 会单独报「薪资上限真正 ≥ 门槛」的比例，
+  提醒你搜回来的不都是达标岗。门槛取自 profile 的 `[match].salary_floor_wan`，
+  **没配就不报这个比例**——不假装存在一条客观的达标线。
 - **同一份 JD 常被多家猎头重复挂出**：正文一字不差，但职位名和标价各挂各的
   （实测有一份被挂了 8 次，同一岗位标价能差 2–3 倍）。
   `load_rows()` 默认按 **JD 正文**去重并保留标价最高的那条——
   用「职位名 + 正文」做键会漏掉大部分重复。
-- **「安全」是中文歧义词**：车规功能安全（ISO 26262 / SOTIF / ASIL）、
-  毒理 / 医学总监、食品安全都会混进来，且与信息安全零交集，必须先剔除。
-- **技能词典里不能用过于宽泛的词**：只写「合规」会把命中率虚高到 30%+，
-  只写「对齐」会命中「对齐业务预期」，`Go` 直接用 `\bgo\b` 会命中英文动词。
-  这几处都限定了上下文。
-- 兜底分类要求 JD 正文出现足够多的赛道信号词，否则归入「其他」——
-  否则按「区块链」关键词返回的 CMO、大客户总监会被整片算成 Web3 技术岗。
-- **同样的「正则太宽」问题也会出在职位名规则里，而且更隐蔽**：
-  `APT` 不加词边界会命中「C**apt**ion」（实测把 5 个标注岗算成了攻防岗），
-  `Web\s?3` 不排除会命中「**Web 3D**」。英文缩写一律加 `\b`，短前缀要排除更长的真词。
-  赛道样本越小，单条误匹配的破坏力越大——**改完 `core/analysis/rules.py` 一定要跑**：
-
-  ```bash
-  uv run python scripts/audit_classification.py --track 安全
-  ```
-
-  `tests/test_classify.py` 把上面每个坑都钉成了回归用例。
+- **薪资门槛比的是区间上限，不是下限。** 上限才代表「这家最多能给到多少」，
+  按下限过滤会误杀「50-80k·20薪」这类实际能谈上去的岗位。
+- **写 `match.toml` 的正则时，英文缩写一定要加 `\b`。** 这是踩过的坑：
+  `APT` 不加词边界会命中「C**apt**ion」，`Web\s?3` 会命中「**Web 3D**」。
+  信号表是你自己的配置，没有人替你复核——`job match --why` 打出命中理由就是
+  给你自查用的。
 
 ## 接口限速
 
@@ -409,7 +399,7 @@ JD 来自详情页里的 `<script type="application/ld+json">` **JobPosting** �
 ```bash
 make check      # ruff + mypy + pytest
 make test
-uv run pytest tests/test_classify.py -v
+uv run pytest tests/test_matching.py -v
 ```
 
 测试不碰真实的 `jobs.db`，也不发任何网络请求：每个用例在临时目录里搭一套

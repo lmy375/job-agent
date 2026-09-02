@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from job_agent import __version__
@@ -22,7 +21,6 @@ from job_agent.core.liepin.errors import LiepinAuthError, LiepinRateLimited
 from job_agent.errors import ConfigError, JobAgentError, StorageError
 from job_agent.log import get_logger
 from job_agent.web.routers import api_router
-from job_agent.web.routers.stats import TrackStatsCache
 from job_agent.web.tasks import TaskManager
 
 logger = get_logger(__name__)
@@ -31,9 +29,8 @@ DESCRIPTION = """
 猎聘职位数据管理台。
 
 - `/api/jobs` 职位列表与详情、投递
-- `/api/tasks` 后台采集任务（搜索 / 抓详情 / 生成报告）
-- `/api/stats` 数据概览与赛道分析
-- `/report` 已生成的 HTML 市场报告
+- `/api/tasks` 后台采集任务（搜索 / 抓详情）
+- `/api/stats` 库内数据概览
 """
 
 
@@ -59,7 +56,6 @@ def create_app(settings: Settings | None = None, context: AppContext | None = No
     )
     app.state.context = ctx
     app.state.tasks = TaskManager()
-    app.state.track_cache = TrackStatsCache()
 
     if resolved.web.cors_origins:
         app.add_middleware(
@@ -71,17 +67,6 @@ def create_app(settings: Settings | None = None, context: AppContext | None = No
 
     _register_error_handlers(app)
     app.include_router(api_router)
-
-    @app.get("/report", include_in_schema=False)
-    def report() -> Any:
-        """把已生成的报告直接吐出来，页面上点一下就能看。"""
-        path = ctx.settings.report.output
-        if not path.is_file():
-            return JSONResponse(
-                status_code=404,
-                content={"detail": "报告还没生成，先在「任务」里跑一次 report", "type": "NotFound"},
-            )
-        return FileResponse(path, media_type="text/html")
 
     _mount_frontend(app, resolved)
     return app

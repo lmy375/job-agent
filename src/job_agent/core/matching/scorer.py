@@ -13,7 +13,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from job_agent.config import Settings
-from job_agent.core.analysis import AnalysisRow, load_rows
+from job_agent.core.dataset import JobFacts, load_rows
 from job_agent.core.matching.rules import MatchRules
 from job_agent.core.storage import Database
 from job_agent.log import get_logger
@@ -35,11 +35,11 @@ class Hit(BaseModel):
 
 
 class ScoredJob(BaseModel):
-    """一条打完分的职位。``row`` 是 :func:`load_rows` 的原始行，字段见 :class:`AnalysisRow`。"""
+    """一条打完分的职位。``row`` 是 :func:`load_rows` 的原始行，字段见 :class:`JobFacts`。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    row: AnalysisRow
+    row: JobFacts
     score: float
     hits: list[Hit] = Field(default_factory=list)
     penalties: list[Hit] = Field(default_factory=list)
@@ -74,7 +74,7 @@ class ScoredJob(BaseModel):
         return "、".join(h.label() for h in self.penalties)
 
 
-def score_row(row: AnalysisRow, rules: MatchRules) -> ScoredJob:
+def score_row(row: JobFacts, rules: MatchRules) -> ScoredJob:
     """给一行打分。同一条信号在标题和正文都命中时只算标题（取高的那份）。"""
     title = row.jobName
     body = " ".join((row.description, row.responsibilities, row.requirements))
@@ -116,7 +116,7 @@ def rank(
     ``floor_wan`` 过滤的是**薪资上限**而不是下限：JD 标的区间上限才代表
     「这家最多能给到多少」，按下限过滤会把「50-80k·20薪」这种谈得上去的岗位误杀。
     """
-    rows = load_rows(db, settings, dedupe=dedupe)
+    rows = load_rows(db, dedupe=dedupe)
     threshold = floor_wan if floor_wan is not None else settings.match.salary_floor_wan
 
     out: list[ScoredJob] = []

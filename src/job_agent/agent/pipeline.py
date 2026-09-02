@@ -9,7 +9,7 @@ from __future__ import annotations
 from job_agent.agent.state import JDVerdict, ShortlistJob
 from job_agent.config import Settings
 from job_agent.context import AppContext
-from job_agent.core.analysis import AnalysisRow
+from job_agent.core.dataset import JobFacts
 from job_agent.core.matching.rules import load_rules
 from job_agent.core.matching.scorer import ScoredJob, rank
 from job_agent.errors import ConfigError
@@ -62,7 +62,7 @@ def _payload(job: ScoredJob) -> ShortlistJob:
     )
 
 
-def _jd_text(row: AnalysisRow) -> str:
+def _jd_text(row: JobFacts) -> str:
     parts = [
         text.strip() for text in (row.description, row.responsibilities, row.requirements)
     ]

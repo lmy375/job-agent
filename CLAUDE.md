@@ -9,7 +9,7 @@
 
 | 环节性质 | 归属 | 判据 |
 | --- | --- | --- |
-| 结论必须可重跑、可测试、两次一样 | **CLI**（`src/job_agent/`） | 采集、限流退避、去重、JD 解析、薪资换算、规则打分、排序、报告 |
+| 结论必须可重跑、可测试、两次一样 | **CLI**（`src/job_agent/`） | 采集、限流退避、去重、JD 解析、薪资换算、规则打分、排序 |
 | 需要读懂文字才能下判断 | **Skill**（`.claude/skills/`） | 读 JD 比硬门槛、简历措辞体检、排投递优先级、写面试口径 |
 | 随人而变 | **Profile**（`profiles/<名字>/`） | 简历、求职偏好、搜索关键词、匹配信号表 |
 
@@ -24,6 +24,41 @@
   必须是代码，不能让 Claude 每次现算——现算的结果不可比。
 - **薪资只有一种口径：税前。** JD 标税前，配置里也一律填税前，不做税后换算——
   到手金额取决于社保基数、公积金比例、年终奖计税方式，算出来是假精确。
+- **不承担市场分析，`src/` 里不许有任何固定的分析逻辑。** 见下面单独一节。
+
+## 不承担市场分析
+
+**「这个市场在招什么、要什么技能、我该看哪个方向」不是这个仓库的功能。**
+曾经有过（`job report` + `core/analysis/`：四条写死的赛道、一份技能词典、
+几百行职位名分类正则），已经整体删除。删掉的理由是它违反了上面第一条推论：
+
+- 赛道 `("AI", "Web3", "安全", "后端")` 写死在 `src/tracks.py`，
+  而且是 `Literal` 类型——做前端或数据的人**连 `[[search.groups]]` 都配不出来**，
+  不是「报告不合口味」，是整条采集链路走不通。
+- 技能词典、职位名正则、报告里「Web3 样本不足，用后端作对照组」这类文案，
+  编码的全是某一个人某一次采集的判断。
+
+分析这件事**太因人而异**：同一批 JD，做算法的人想看框架分布，做管理的人想看
+汇报线与团队规模，换城市的人想看地域薪资差。任何一种固定切法都只对写它的人有用。
+所以这一层交给 skill（读 JD 现场分析）或用户自己的脚本（`scripts/` 里的一次性工具），
+仓库只负责把**事实**准备好。
+
+具体边界：
+
+| 是事实，留在仓库 | 是分析，不在仓库 |
+| --- | --- |
+| 按 JD 正文去重、保留标价最高的那条 | 「这条属于哪个赛道」 |
+| 薪资文案 → 年薪区间（万元，税前） | 「这个赛道薪资中位数多少」 |
+| 库存计数（多少职位、多少 JD、投了多少） | 「哪个方向在涨」 |
+| 按 `match.toml` 信号表打分排序（信号表是**用户的**配置） | 「JD 里提到哪些技能、占比多少」 |
+
+判据很简单：**结论会不会因为换个人就该重写？** 会 → 不进 `src/`。
+（打分排序看似是分析，但它读的是用户自己写的 `match.toml`，
+代码里只有「按正则命中加权重、按分数排序」这一条通用规则，没有任何取向。）
+
+顺带一条：`salary_summary()` 这类统计**不许写死门槛**。「多少算达标」由调用方
+从 profile 传进来（`[match].salary_floor_wan`），没配就不报达标比例——
+不要假装有个客观的达标线。
 
 ## 为什么是 CLI + skill，不是 SDK
 
@@ -81,9 +116,9 @@ config/
   templates/           # 新建 profile 的模板，整份 copytree 过去
 profiles/              # 整个目录不进版本库
   default/
-    profile.toml       # 搜索条件与关键词分组、match 门槛、report
-    resume.md  preferences.md  match.toml  insights/
-    data/              # jobs.db、shortlist.md、job-report.html、agent-plan.md
+    profile.toml       # 搜索条件与关键词分组、match 门槛
+    resume.md  preferences.md  match.toml
+    data/              # jobs.db、shortlist.md、agent-plan.md
   web3/
     ...
 ```
@@ -93,7 +128,7 @@ profiles/              # 整个目录不进版本库
 | 文件 | 段 | 一句话 |
 | --- | --- | --- |
 | `config/config.toml` | `[profiles]`、`[liepin]`（含 `[liepin.accounts.*]`）、`[detail]`、`[agent]`（含 `.providers.*` / `.langsmith`）、`[web]`、`[logging]` | 管**怎么连**，跟人无关 |
-| `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[match]`、`[report]` | 管**找什么**，随人而变 |
+| `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[match]` | 管**找什么**，随人而变 |
 
 不重叠是刻意的，也是硬约束（`tests/test_boundaries.py` 会强制）：同一个段要是能出现在
 两个文件里，下场一定是「改了一个忘了另一个」。放错文件时 `extra="forbid"` 会当场报错，
@@ -130,7 +165,7 @@ job -p web3 search        # 任何命令都能 -p 指定
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
 job search → job detail → job match → job shortlist → /job-match → job apply
-                       ↘ job report / job web （看市场大盘）
+                       ↘ job web （翻 JD、看库存、点投递）
 
 job-agent [-p <名字>] [--collect] [--apply]   # 同一条流程的无人值守版，
                                               # 与 CLI 共享同一个 profile 目录
@@ -206,8 +241,8 @@ job-agent [-p <名字>] [--collect] [--apply]   # 同一条流程的无人值守
   `config/config.example.toml` 与 `config/templates/` 进。
 - **默认直接往 `main` 提交并推送，不建分支、不开 PR。** 除非用户明确要求走分支或 PR。
   这是个单人仓库，没有代码评审环节，分支只会多两次切换、留一堆没人合的残枝。
-- 分析口径上的坑（薪资区间重叠过滤、`searchKeyword` 与分类兜底的关系、
-  接口限速实测值）见 README 的「分析口径」与「接口限速」两节，改相关代码前先读。
+- 取数口径上的坑（薪资区间重叠过滤、JD 正文去重、接口限速实测值）见 README 的
+  「取数口径」与「接口限速」两节，改相关代码前先读。
 
 ## 开发
 

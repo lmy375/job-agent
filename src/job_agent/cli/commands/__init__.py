@@ -11,7 +11,6 @@ from job_agent.cli.commands import (
     detail_cmd,
     match_cmd,
     profile_cmd,
-    report_cmd,
     reset_cmd,
     resume_cmd,
     search_cmd,
@@ -31,7 +30,6 @@ def register(app: typer.Typer) -> None:
         shortlist_cmd.shortlist
     )
     app.command("apply", help="投递职位（可传多个 jobId）。")(apply_cmd.apply)
-    app.command("report", help="根据已抓取的 JD 生成 HTML 市场分析报告。")(report_cmd.report)
     app.command("stats", help="在终端查看库内数据概览。")(stats_cmd.stats)
     app.command("web", help="启动 Web 管理服务（数据浏览 + 采集任务 + 投递）。")(web_cmd.web)
     app.command("reset", help="删掉数据库并重建空库（不做迁移，重采即可）。")(reset_cmd.reset)
