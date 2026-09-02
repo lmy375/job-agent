@@ -1,37 +1,43 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api.js";
 import { formatTime } from "../format.js";
 
-const PAGE_SIZE = 50;
+/**
+ * 职位列表。
+ *
+ * **刻意不分页**：本地单人用、职位数有限（一次采集几百到几千条），
+ * 一次全取回来，排序与翻找都在浏览器里做——点表头即时重排，不用等请求。
+ * 后端只在「命中数超过兜底上限」时才截断，那种情况下面会明说。
+ */
 
+//: 可点击排序的列。`get` 取出用来比较的值，null / undefined 一律排最后
 const COLUMNS = [
-  { key: "jobName", label: "职位" },
-  { key: "company", label: "公司" },
-  { key: "location", label: "地点" },
-  { key: "salary", label: "薪资" },
-  { key: "education", label: "学历" },
-  { key: "workYears", label: "经验" },
-  { key: "searchKeyword", label: "搜索关键词" },
+  { key: "scoreRank", label: "#", get: (j) => j.scoreRank, numeric: true, className: "rank" },
+  { key: "score", label: "分", get: (j) => j.score, numeric: true, className: "score" },
+  { key: "jobName", label: "职位", get: (j) => j.jobName },
+  { key: "company", label: "公司", get: (j) => j.company },
+  { key: "location", label: "地点", get: (j) => j.location },
+  { key: "salary", label: "薪资", get: (j) => j.salaryHighWan, numeric: true },
+  { key: "education", label: "学历", get: (j) => j.education },
+  { key: "workYears", label: "经验", get: (j) => j.workYears },
+  { key: "searchKeyword", label: "搜索关键词", get: (j) => j.searchKeyword },
 ];
 
-const ORDERS = [
-  { value: "recent", label: "最近采集" },
-  { value: "salary", label: "薪资从高到低" },
-  { value: "salary_asc", label: "薪资从低到高" },
-];
+//: 后端排序只决定「被截断时留下哪些」，细排序在前端做
+const FETCH_ORDER = "score";
 
 export default function JobsView() {
   const [keywords, setKeywords] = useState([]);
   const [filters, setFilters] = useState({
     keyword: "",
     q: "",
-    order: "recent",
     min_salary: "",
     has_detail: "",
     applied: "",
   });
-  const [page, setPage] = useState(0);
-  const [data, setData] = useState({ total: 0, jobs: [] });
+  //: 排序状态：列 key + 方向。默认按分数从高到低（分诊结果就是拿来这么看的）
+  const [sort, setSort] = useState({ key: "score", desc: true });
+  const [data, setData] = useState({ total: 0, limit: 0, jobs: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(null);
@@ -47,26 +53,46 @@ export default function JobsView() {
     setLoading(true);
     setError("");
     api
-      .jobs({
-        ...filters,
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
-      })
+      .jobs({ ...filters, order: FETCH_ORDER })
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [filters, page]);
+  }, [filters]);
 
-  // 输入框防抖：搜索条件一变就等 250ms 再打请求
+  // 输入框防抖：筛选条件一变就等 250ms 再打请求
   useEffect(() => {
     const timer = setTimeout(load, 250);
     return () => clearTimeout(timer);
   }, [load]);
 
-  const update = (patch) => {
-    setPage(0);
-    setFilters((prev) => ({ ...prev, ...patch }));
+  const update = (patch) => setFilters((prev) => ({ ...prev, ...patch }));
+
+  const toggleSort = (key) => {
+    setSort((prev) => {
+      if (prev.key !== key) {
+        // 换列时给个合理的初始方向：分数、薪资、名次这类数字列先看「最靠前的」
+        const column = COLUMNS.find((c) => c.key === key);
+        return { key, desc: column?.numeric ? key !== "scoreRank" : false };
+      }
+      return { key, desc: !prev.desc };
+    });
   };
+
+  const sorted = useMemo(() => {
+    const column = COLUMNS.find((c) => c.key === sort.key);
+    if (!column) return data.jobs;
+    const dir = sort.desc ? -1 : 1;
+    return [...data.jobs].sort((a, b) => {
+      const x = column.get(a);
+      const y = column.get(b);
+      // 没值的一律沉底，不管升序降序——「没打分」不是「分最低」
+      const xMissing = x === null || x === undefined || x === "";
+      const yMissing = y === null || y === undefined || y === "";
+      if (xMissing || yMissing) return xMissing && yMissing ? 0 : xMissing ? 1 : -1;
+      if (column.numeric) return (x - y) * dir;
+      return String(x).localeCompare(String(y), "zh") * dir;
+    });
+  }, [data.jobs, sort]);
 
   const toggleDetail = async (jobId) => {
     if (expanded === jobId) {
@@ -102,7 +128,7 @@ export default function JobsView() {
     }
   };
 
-  const pages = Math.ceil(data.total / PAGE_SIZE);
+  const truncated = data.total > data.jobs.length;
 
   return (
     <>
@@ -113,13 +139,6 @@ export default function JobsView() {
           value={filters.q}
           onChange={(e) => update({ q: e.target.value })}
         />
-        <select value={filters.order} onChange={(e) => update({ order: e.target.value })}>
-          {ORDERS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
         <label>
           年薪上限 ≥
           <input
@@ -165,20 +184,19 @@ export default function JobsView() {
 
       {error && <div className="alert error">{error}</div>}
       {notice && <div className="alert">{notice}</div>}
+      {truncated && (
+        <div className="alert error">
+          命中 {data.total} 条，只返回了前 {data.jobs.length} 条（后端兜底上限{" "}
+          {data.limit}）。下面的排序只在这批里生效——收紧筛选条件再看。
+        </div>
+      )}
 
       <div className="meta list-meta">
         命中 <b>{data.total}</b> 条{loading ? " · 加载中…" : ""}
-        {pages > 1 && (
-          <span className="pager">
-            <button disabled={page === 0} onClick={() => setPage((p) => p - 1)}>
-              上一页
-            </button>
-            第 {page + 1} / {pages} 页
-            <button disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>
-              下一页
-            </button>
-          </span>
-        )}
+        <span className="muted">
+          {" "}
+          · 点表头排序 · 分数由 <code>job score</code> 落库，改了 [score] 记得重跑
+        </span>
       </div>
 
       <div className="table-wrap">
@@ -186,15 +204,33 @@ export default function JobsView() {
           <thead>
             <tr>
               {COLUMNS.map((c) => (
-                <th key={c.key}>{c.label}</th>
+                <th
+                  key={c.key}
+                  className={sort.key === c.key ? "sortable sorted" : "sortable"}
+                  onClick={() => toggleSort(c.key)}
+                  title="点击按这一列排序"
+                >
+                  {c.label}
+                  {sort.key === c.key && <span className="arrow">{sort.desc ? "↓" : "↑"}</span>}
+                </th>
               ))}
               <th>操作</th>
             </tr>
           </thead>
           <tbody>
-            {data.jobs.map((job) => (
+            {sorted.map((job) => (
               <Fragment key={job.jobId}>
-                <tr>
+                <tr className={job.offTrack ? "off-track" : undefined}>
+                  <td className="rank">{job.scoreRank ?? "—"}</td>
+                  <td className="score">
+                    {job.score === null || job.score === undefined ? (
+                      <span className="muted" title="还没打分：抓到 JD 后跑 job score">
+                        —
+                      </span>
+                    ) : (
+                      <span title={scoreTitle(job)}>{Math.round(job.score)}</span>
+                    )}
+                  </td>
                   <td className="job-name">
                     <button className="link" onClick={() => toggleDetail(job.jobId)}>
                       {job.jobName}
@@ -242,15 +278,13 @@ export default function JobsView() {
                   <tr className="detail-row">
                     <td colSpan={COLUMNS.length + 1}>
                       {!detail && <div className="muted">加载中…</div>}
-                      {detail && detail.jobId === job.jobId && (
-                        <JobDetail detail={detail} />
-                      )}
+                      {detail && detail.jobId === job.jobId && <JobDetail detail={detail} />}
                     </td>
                   </tr>
                 )}
               </Fragment>
             ))}
-            {data.jobs.length === 0 && !loading && (
+            {sorted.length === 0 && !loading && (
               <tr>
                 <td colSpan={COLUMNS.length + 1} className="empty">
                   没有数据。先在「采集任务」里跑一次搜索。
@@ -264,10 +298,31 @@ export default function JobsView() {
   );
 }
 
+/** 悬停时把命中/扣分理由摆出来：分数本身不可信，理由才让人能复核排序。 */
+function scoreTitle(job) {
+  const lines = [];
+  if (job.scoreHits?.length) lines.push(`+ ${job.scoreHits.join("、")}`);
+  if (job.scorePenalties?.length) lines.push(`− ${job.scorePenalties.join("、")}`);
+  if (job.scoredAt) lines.push(`打分时间：${formatTime(job.scoredAt)}`);
+  return lines.join("\n") || "无命中信号";
+}
+
 function JobDetail({ detail }) {
   const jd = detail.detail;
   return (
     <div className="jd">
+      {(detail.scoreHits?.length > 0 || detail.scorePenalties?.length > 0) && (
+        <div className="jd-meta">
+          <span>
+            分 {Math.round(detail.score)} · 全库第 {detail.scoreRank} 名
+          </span>
+          {detail.scoreHits?.length > 0 && <span>命中：{detail.scoreHits.join("、")}</span>}
+          {detail.scorePenalties?.length > 0 && (
+            <span>扣分：{detail.scorePenalties.join("、")}</span>
+          )}
+          <span className="muted">分数只做分诊，该不该投要读下面的 JD</span>
+        </div>
+      )}
       {detail.applications?.length > 0 && (
         <div className="alert">
           投递记录：

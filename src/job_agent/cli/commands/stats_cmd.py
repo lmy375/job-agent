@@ -10,6 +10,7 @@ from __future__ import annotations
 import typer
 
 from job_agent.cli.state import CliState
+from job_agent.core.storage import ScoreStatus
 
 _TOP_KEYWORDS = 12
 
@@ -40,9 +41,23 @@ def stats(ctx: typer.Context) -> None:
             "（[score].salary_floor_wan 没配，不报达标比例）"
         )
 
+    score = context.scores.status(settings.score.fingerprint)
+    typer.echo(f"  已打分          {score.scored}{_score_note(score)}")
+
     typer.secho("\n按搜索关键词", bold=True)
     for row in context.jobs.keyword_counts()[:_TOP_KEYWORDS]:
         typer.echo(f"  {row.keyword:<16}{row.count:>6}")
+
+
+def _score_note(score: ScoreStatus) -> str:
+    """落库分数新鲜不新鲜。过期就直说该重跑——旧分数看不出旧，最容易被当成现在的。"""
+    if score.scored == 0:
+        return "  ← 还没打过分，跑 job score"
+    if score.stale:
+        return "  ← [score] 改过但没重新打分，跑 job score"
+    if score.missing:
+        return f"  ← 还有 {score.missing} 条有 JD 没打分，跑 job score"
+    return f"（{score.scoredAt:%Y-%m-%d %H:%M}）" if score.scoredAt else ""
 
 
 def _fmt(counts: dict[str, int]) -> str:

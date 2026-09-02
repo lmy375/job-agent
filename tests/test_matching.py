@@ -17,7 +17,7 @@ import pytest
 from conftest import PROFILE, PROFILE_TOML, make_detail, make_job
 from job_agent.config import ScoreConfig, load_settings
 from job_agent.core.dataset import JobFacts
-from job_agent.core.matching import rank, render_shortlist, score_row
+from job_agent.core.matching import refresh, render_shortlist, score_row
 from job_agent.core.matching.shortlist import TODO
 from job_agent.errors import ConfigError
 
@@ -146,7 +146,7 @@ def test_rank_orders_by_score(context):
     context.details.upsert(make_detail(1, description=AGENT_JD))
     context.details.upsert(make_detail(2, description=BACKEND_JD))
 
-    ranked = rank(context.db, context.settings)
+    ranked = refresh(context.db, context.settings).view(context.settings)
     assert [j.job_id for j in ranked] == [1, 2]
     assert ranked[0].score > ranked[1].score
 
@@ -158,7 +158,7 @@ def test_rank_attaches_salary_band(context):
     )
     context.details.upsert(make_detail(1, description=AGENT_JD))
 
-    job = rank(context.db, context.settings)[0]
+    job = refresh(context.db, context.settings).view(context.settings)[0]
     # 80-100k·15薪 = 120–150 万
     assert job.salary_low == pytest.approx(120.0)
     assert job.salary_high == pytest.approx(150.0)
@@ -176,7 +176,7 @@ def test_rank_filters_by_salary_ceiling(context):
     for job_id in (1, 2):
         context.details.upsert(make_detail(job_id, description=AGENT_JD))
 
-    ranked = rank(context.db, context.settings, floor_wan=135.0)
+    ranked = refresh(context.db, context.settings).view(context.settings, floor_wan=135.0)
     assert [j.job_id for j in ranked] == [1]
 
 
@@ -184,7 +184,84 @@ def test_rank_skips_jobs_without_jd(context):
     context.jobs.upsert_many([make_job(1, jobName="Agent 工程师")], keyword="AI Agent")
     context.details.upsert(make_detail(1, status="no_jd"))
 
-    assert rank(context.db, context.settings) == []
+    assert refresh(context.db, context.settings).view(context.settings) == []
+
+
+# ---------------------------------------------------------------- 落库与新鲜度
+
+
+def test_refresh_persists_score_and_rank(context):
+    """分数与全库排名要落进 job_scores，Web 端直接读库排序靠的就是这个。"""
+    context.jobs.upsert_many(
+        [
+            make_job(1, jobName="Agent 工程师", salary="80-100k·15薪"),
+            make_job(2, jobName="后端开发", salary="80-100k·15薪"),
+        ],
+        keyword="AI Agent",
+    )
+    context.details.upsert(make_detail(1, description=AGENT_JD))
+    context.details.upsert(make_detail(2, description=BACKEND_JD))
+
+    result = refresh(context.db, context.settings)
+    rows = {r.jobId: r for r in context.jobs.find().items}
+    assert rows[1].scoreRank == 1 and rows[2].scoreRank == 2
+    assert rows[1].score is not None and rows[1].score > (rows[2].score or 0)
+    assert "Agent" in " ".join(rows[1].scoreHits)
+    # 不对口的那条要留下扣分理由，不能只剩一个数字
+    assert rows[2].offTrack is True
+    assert rows[2].scorePenalties
+    assert result.fingerprint == context.settings.score.fingerprint
+
+
+def test_refresh_is_a_full_rewrite(context):
+    """整表重写：上一轮打过分、这一轮不该有分的行，不许留下旧分数。"""
+    context.jobs.upsert_many([make_job(1, jobName="Agent 工程师")], keyword="AI Agent")
+    context.details.upsert(make_detail(1, description=AGENT_JD))
+    refresh(context.db, context.settings)
+    assert context.scores.status(context.settings.score.fingerprint).scored == 1
+
+    # JD 撤了（重采时变成 no_jd）→ 这条不再可打分，旧分数必须消失
+    context.details.upsert(make_detail(1, status="no_jd", description=""))
+    refresh(context.db, context.settings)
+    assert context.scores.status(context.settings.score.fingerprint).scored == 0
+
+
+def test_refresh_persists_all_even_when_view_filters(context):
+    """落库是全量的：--floor 只影响这次看到什么，不影响写进库里的名次。"""
+    context.jobs.upsert_many(
+        [
+            make_job(1, jobName="Agent 工程师", salary="80-100k·15薪"),  # 上限 150 万
+            make_job(2, jobName="Agent 专家", salary="20-30k·12薪"),  # 上限 36 万
+        ],
+        keyword="AI Agent",
+    )
+    context.details.upsert(make_detail(1, description=AGENT_JD))
+    context.details.upsert(make_detail(2, description=AGENT_JD + " 另一家"))
+
+    result = refresh(context.db, context.settings)
+    assert len(result.view(context.settings, floor_wan=135.0)) == 1
+    assert context.scores.status(context.settings.score.fingerprint).scored == 2
+
+
+def test_score_status_reports_staleness(context, settings):
+    context.jobs.upsert_many([make_job(1, jobName="Agent 工程师")], keyword="AI Agent")
+    context.details.upsert(make_detail(1, description=AGENT_JD))
+
+    assert context.scores.status(settings.score.fingerprint).scored == 0
+    refresh(context.db, settings)
+    fresh = context.scores.status(settings.score.fingerprint)
+    assert fresh.fresh and fresh.scoredAt is not None
+
+    # 改了信号表还没重跑 → 过期
+    changed = settings.model_copy(deep=True)
+    changed.score.signals[0].weight = 99.0
+    assert context.scores.status(changed.score.fingerprint).stale is True
+
+    # 采了新数据还没重跑 → 有未打分的
+    context.jobs.upsert_many([make_job(2, jobName="Agent 架构师")], keyword="AI Agent")
+    context.details.upsert(make_detail(2, description=AGENT_JD + " 另一家"))
+    behind = context.scores.status(settings.score.fingerprint)
+    assert behind.missing == 1 and not behind.fresh
 
 
 # ---------------------------------------------------------------- 清单渲染
@@ -196,7 +273,7 @@ def test_shortlist_leaves_judgement_blank(context, settings):
     )
     context.details.upsert(make_detail(1, description=AGENT_JD))
 
-    ranked = rank(context.db, context.settings)
+    ranked = refresh(context.db, context.settings).view(context.settings)
     markdown = render_shortlist(ranked, settings, limit=5)
 
     # 确定性的部分必须在
@@ -217,7 +294,7 @@ def test_shortlist_limit_is_respected(context, settings):
         # JD 各不相同，否则会被按正文去重
         context.details.upsert(make_detail(i, description=f"{AGENT_JD}\n项目编号 {i}"))
 
-    ranked = rank(context.db, context.settings)
+    ranked = refresh(context.db, context.settings).view(context.settings)
     assert len(ranked) == 5
 
     markdown = render_shortlist(ranked, settings, limit=2)

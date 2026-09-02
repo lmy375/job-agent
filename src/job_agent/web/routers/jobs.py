@@ -8,14 +8,14 @@ from fastapi import APIRouter, HTTPException, Path, Query
 
 from job_agent.core.services import ApplyService
 from job_agent.core.storage import JobBundle, JobQuery
-from job_agent.core.storage.repositories import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from job_agent.core.storage.repositories import MAX_ROWS
 from job_agent.web.deps import ContextDep
 from job_agent.web.schemas import ApplyRequest, ApplyResponse, JobListResponse
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
-@router.get("", response_model=JobListResponse, summary="职位列表（分页）")
+@router.get("", response_model=JobListResponse, summary="职位列表（不分页，一次全给）")
 def list_jobs(
     context: ContextDep,
     keyword: Annotated[str | None, Query(description="按 searchKeyword 精确筛选")] = None,
@@ -25,12 +25,17 @@ def list_jobs(
     min_salary: Annotated[
         float | None, Query(ge=0, description="年薪上限不低于该值（万元）")
     ] = None,
+    scored: Annotated[bool | None, Query(description="是否已打分（job score 落库的）")] = None,
     order: Annotated[
-        Literal["recent", "salary", "salary_asc"], Query(description="排序方式")
-    ] = "recent",
-    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = DEFAULT_PAGE_SIZE,
-    offset: Annotated[int, Query(ge=0)] = 0,
+        Literal["score", "recent", "salary", "salary_asc"],
+        Query(description="排序方式。截断时决定留下哪些，细排序前端自己做"),
+    ] = "score",
+    limit: Annotated[int, Query(ge=1, le=MAX_ROWS)] = MAX_ROWS,
 ) -> JobListResponse:
+    """**不分页**：本地单人用、职位数有限，一次全给，排序与翻找都在浏览器里做。
+
+    ``limit`` 只是兜底上限。真截断了响应里 ``total > len(jobs)``，前端会说出来。
+    """
     page = context.jobs.find(
         JobQuery(
             keyword=keyword,
@@ -38,12 +43,12 @@ def list_jobs(
             has_detail=has_detail,
             applied=applied,
             min_salary=min_salary,
+            scored=scored,
             order=order,
             limit=limit,
-            offset=offset,
         )
     )
-    return JobListResponse(total=page.total, limit=limit, offset=offset, jobs=page.items)
+    return JobListResponse(total=page.total, limit=limit, jobs=page.items)
 
 
 @router.get("/{job_id}", response_model=JobBundle, summary="单条职位（含 JD 与投递记录）")

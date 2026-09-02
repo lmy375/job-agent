@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -96,3 +96,32 @@ class ApplicationRecord(Base):
     status: Mapped[str] = mapped_column(String, default="", index=True)
     message: Mapped[str] = mapped_column(Text, default="")
     appliedAt: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class JobScoreRecord(Base):
+    """``job score`` 落库的分数与排名。
+
+    单独一张表，不塞进 ``jobs``：``jobs`` 存的是猎聘接口返回的**事实**，
+    这里存的是按**用户自己的** ``[score]`` 信号表算出来的结论。
+    两者的生命周期也不同——重新打分是整表重写，采集是按 jobId 累积。
+
+    ``rulesFingerprint`` 每行都存一份（同一次刷新里所有行都一样）：
+    整表是一次事务里重写的，不存在半新半旧，所以不需要再开一张运行记录表；
+    读的时候拿它和当前配置的指纹一比，就知道分数过期没。
+    """
+
+    __tablename__ = "job_scores"
+
+    jobId: Mapped[int] = mapped_column(Integer, primary_key=True)
+    score: Mapped[float] = mapped_column(Float, default=0.0, index=True)
+    #: 全库密集排名（按 score 降序，1 起）。**与 --floor / -n 无关**——
+    #: 那些是看的时候的过滤条件，不该让同一条职位的名次随着看法变
+    rank: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    #: 职位名与 JD 都没命中 [score.require].pattern
+    offTrack: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: 命中 / 扣分信号的名字，给「为什么排这么高」留证据
+    hits: Mapped[list[str]] = mapped_column(JSON, default=list)
+    penalties: Mapped[list[str]] = mapped_column(JSON, default=list)
+    #: 算这批分数时 [score] 配置的指纹，见类文档
+    rulesFingerprint: Mapped[str] = mapped_column(String, default="", index=True)
+    scoredAt: Mapped[datetime] = mapped_column(DateTime, default=_now)

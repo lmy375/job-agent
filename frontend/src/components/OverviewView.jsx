@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
+import { formatTime } from "../format.js";
+
+/** 落库分数的新鲜度：过期或有漏打的必须说出来，不能让人把旧分数当成现在的。 */
+function scoreNote(score) {
+  if (score.scored === 0) return { text: "还没打过分——跑 job score", warn: true };
+  if (score.stale) return { text: "[score] 改过但没重新打分——跑 job score", warn: true };
+  if (score.missing > 0)
+    return { text: `${score.missing} 条有 JD 却没打分——跑 job score`, warn: true };
+  return { text: `最近一次 ${formatTime(score.scoredAt)}`, warn: false };
+}
 
 export default function OverviewView() {
   const [stats, setStats] = useState(null);
@@ -28,6 +38,12 @@ export default function OverviewView() {
               note={`${stats.salary.meetsFloor}/${stats.salary.parsed} 条`}
             />
           )}
+          <Stat
+            value={stats.score.scored}
+            label="已打分"
+            note={scoreNote(stats.score).text}
+            warn={scoreNote(stats.score).warn}
+          />
           <Stat
             value={Object.values(stats.applications).reduce((a, b) => a + b, 0)}
             label="投递记录"
@@ -85,12 +101,12 @@ export default function OverviewView() {
   );
 }
 
-function Stat({ value, label, note }) {
+function Stat({ value, label, note, warn }) {
   return (
     <div className="stat">
       <div className="stat-v">{value}</div>
       <div className="stat-l">{label}</div>
-      {note && <div className="stat-n">{note}</div>}
+      {note && <div className={warn ? "stat-n warn" : "stat-n"}>{note}</div>}
     </div>
   );
 }

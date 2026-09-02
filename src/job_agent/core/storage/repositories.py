@@ -11,13 +11,18 @@ from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import Select, func, select
+from sqlalchemy import Select, func, insert, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from job_agent.core.liepin.models import Job
 from job_agent.core.salary import parse_salary
 from job_agent.core.storage.database import Database
-from job_agent.core.storage.models import ApplicationRecord, JobDetailRecord, JobRecord
+from job_agent.core.storage.models import (
+    ApplicationRecord,
+    JobDetailRecord,
+    JobRecord,
+    JobScoreRecord,
+)
 from job_agent.core.storage.rows import (
     ApplicationRow,
     JobBundle,
@@ -26,6 +31,8 @@ from job_agent.core.storage.rows import (
     KeywordCount,
     PendingDetail,
     SalarySummary,
+    ScoreEntry,
+    ScoreStatus,
 )
 from job_agent.log import get_logger
 
@@ -34,17 +41,36 @@ logger = get_logger(__name__)
 #: 视为「已投递成功」的状态：already_applied 也算投过（服务端说已投过就是投过）
 APPLIED_STATUSES = ("ok", "already_applied")
 
-OrderBy = Literal["recent", "salary", "salary_asc"]
+OrderBy = Literal["score", "recent", "salary", "salary_asc"]
 
-DEFAULT_PAGE_SIZE = 200
-MAX_PAGE_SIZE = 2000
+#: 一次最多返回多少条。**这不是分页**——本地单人用、职位数有限，
+#: 前端一页显示完；这个上限只是别让一次响应大到离谱的兜底。
+#: 命中数超过它时响应里的 total 会大于 jobs 长度，前端必须把这件事说出来
+MAX_ROWS = 5000
+
+
+def _attach_score(row: JobRow, record: JobScoreRecord | None) -> JobRow:
+    """把 ``job_scores`` 的一行挂到职位行上。没打分就保持默认（score=None）。"""
+    if record is not None:
+        row.score = record.score
+        row.scoreRank = record.rank
+        row.offTrack = record.offTrack
+        row.scoreHits = list(record.hits)
+        row.scorePenalties = list(record.penalties)
+        row.scoredAt = record.scoredAt
+    return row
+
+
+def _job_row(job: JobRecord, score: JobScoreRecord | None) -> JobRow:
+    return _attach_score(JobRow.model_validate(job), score)
 
 
 class JobQuery(BaseModel):
-    """职位列表的查询条件。默认分页，避免一次把整库塞进响应。
+    """职位列表的查询条件。
 
-    归一（空串当没填、分页夹到合法区间）交给字段校验器，
-    构造出来的实例即已归一，调用方不需要再记得调一次什么方法。
+    **不分页**：本地单人用、职位数有限，一次全给前端，排序在浏览器里做。
+    ``limit`` 只是兜底上限，不是页大小；归一（空串当没填、上限夹到合法区间）
+    交给字段校验器，构造出来的实例即已归一。
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -54,9 +80,10 @@ class JobQuery(BaseModel):
     has_detail: bool | None = None
     applied: bool | None = None
     min_salary: float | None = None  # 年薪下限（万元），比较的是 salaryHighWan
-    order: OrderBy = "recent"
-    limit: int = DEFAULT_PAGE_SIZE
-    offset: int = 0
+    #: 只看打过分的（用来筛掉还没抓 JD、因此没有分数的那些）
+    scored: bool | None = None
+    order: OrderBy = "score"
+    limit: int = MAX_ROWS
 
     @field_validator("keyword", "q")
     @classmethod
@@ -67,12 +94,7 @@ class JobQuery(BaseModel):
     @classmethod
     def _clamp_limit(cls, value: int) -> int:
         # 夹住而不是报错：上层已经在 HTTP 参数上校验过，这里只是兜底
-        return max(1, min(value, MAX_PAGE_SIZE))
-
-    @field_validator("offset")
-    @classmethod
-    def _floor_offset(cls, value: int) -> int:
-        return max(0, value)
+        return max(1, min(value, MAX_ROWS))
 
 
 class JobPage(BaseModel):
@@ -118,15 +140,30 @@ class JobRepository:
     # ---------------------------------------------------------------- 查询
 
     def find(self, query: JobQuery | None = None) -> JobPage:
+        """职位列表，LEFT JOIN 上 ``job_scores`` 的分数与排名。
+
+        外连接而不是内连接：没抓 JD 的职位打不了分，但它们仍然该出现在列表里
+        （前端要能筛「未抓到 JD」）。没分数的行 ``score`` / ``scoreRank`` 是 None。
+        """
         q = query or JobQuery()
-        base = self._apply_filters(select(JobRecord), q)
+        base = self._apply_filters(
+            select(JobRecord, JobScoreRecord).outerjoin(
+                JobScoreRecord, JobRecord.jobId == JobScoreRecord.jobId
+            ),
+            q,
+        )
 
         with self.db.session() as s:
             total = s.scalar(
-                self._apply_filters(select(func.count()).select_from(JobRecord), q)
+                self._apply_filters(
+                    select(func.count())
+                    .select_from(JobRecord)
+                    .outerjoin(JobScoreRecord, JobRecord.jobId == JobScoreRecord.jobId),
+                    q,
+                )
             ) or 0
-            stmt = base.order_by(*self._order_clause(q.order)).limit(q.limit).offset(q.offset)
-            items = [JobRow.model_validate(r) for r in s.scalars(stmt)]
+            stmt = base.order_by(*self._order_clause(q.order)).limit(q.limit)
+            items = [_job_row(job, score) for job, score in s.execute(stmt)]
         return JobPage(total=total, items=items)
 
     def get(self, job_id: int) -> JobRow | None:
@@ -149,6 +186,7 @@ class JobRepository:
             # 先按职位行校验，再挂上关联数据：两张表之间没有外键，
             # 让 ORM 去做 relationship 只会为一个接口引入懒加载的坑
             bundle = JobBundle.model_validate(job)
+            _attach_score(bundle, s.get(JobScoreRecord, job_id))
             bundle.detail = JobDetailRow.model_validate(detail) if detail else None
             bundle.applications = [ApplicationRow.model_validate(a) for a in applications]
             return bundle
@@ -243,10 +281,21 @@ class JobRepository:
             stmt = stmt.where(
                 JobRecord.jobId.in_(applied) if q.applied else JobRecord.jobId.not_in(applied)
             )
+        if q.scored is not None:
+            stmt = stmt.where(
+                JobScoreRecord.jobId.is_not(None) if q.scored else JobScoreRecord.jobId.is_(None)
+            )
         return stmt
 
     @staticmethod
     def _order_clause(order: OrderBy) -> tuple[Any, ...]:
+        if order == "score":
+            # 没打分的排在最后：nulls last 在 SQLite 上要自己拼，用 is_(None) 当第一键
+            return (
+                JobScoreRecord.score.is_(None),
+                JobScoreRecord.score.desc(),
+                JobRecord.salaryHighWan.desc(),
+            )
         if order == "salary":
             # NULL 排最后：薪资写「面议」的职位不该顶在「薪资最高」列表前面
             return (
@@ -335,3 +384,57 @@ class ApplicationRepository:
         )
         with self.db.session() as s:
             return {status or "(空)": n for status, n in s.execute(stmt)}
+
+
+class ScoreRepository:
+    """``job_scores`` 表：整表重写 + 新鲜度查询。
+
+    刻意只有「整表重写」这一种写法，没有按条更新：分数之间是有关系的
+    （``rank`` 是全库排名），改一条的权重会牵动别人的名次。
+    半张表新半张表旧的排名是错的，而且错得看不出来。
+    """
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def replace_all(self, entries: Sequence[ScoreEntry], fingerprint: str) -> int:
+        """清表重写。一个事务，中途失败不会留下半新半旧的排名。"""
+        stamped = datetime.now()
+        with self.db.session() as s:
+            s.query(JobScoreRecord).delete()
+            if entries:
+                s.execute(
+                    insert(JobScoreRecord),
+                    [
+                        {
+                            **entry.model_dump(),
+                            "rulesFingerprint": fingerprint,
+                            "scoredAt": stamped,
+                        }
+                        for entry in entries
+                    ],
+                )
+        logger.debug("写入 %d 条分数（fingerprint=%s）", len(entries), fingerprint)
+        return len(entries)
+
+    def status(self, fingerprint: str) -> ScoreStatus:
+        """落库分数新鲜不新鲜：有多少条、多少条有 JD 却没分、信号表变了没。"""
+        scorable = (
+            select(func.count())
+            .select_from(JobRecord)
+            .join(JobDetailRecord, JobRecord.jobId == JobDetailRecord.jobId)
+            .where(JobDetailRecord.status == "ok")
+        )
+        with self.db.session() as s:
+            scored = s.scalar(select(func.count()).select_from(JobScoreRecord)) or 0
+            if not scored:
+                return ScoreStatus(scored=0, missing=s.scalar(scorable) or 0, stale=False)
+            total_scorable = s.scalar(scorable) or 0
+            stamped = s.scalar(select(func.max(JobScoreRecord.scoredAt)))
+            prints = set(s.scalars(select(JobScoreRecord.rulesFingerprint).distinct()))
+        return ScoreStatus(
+            scored=scored,
+            missing=max(total_scorable - scored, 0),
+            stale=prints != {fingerprint},
+            scoredAt=stamped,
+        )

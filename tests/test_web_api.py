@@ -42,10 +42,40 @@ def test_health(client, context):
     assert body["jobs"] == context.jobs.count()
 
 
+def test_jobs_expose_score_and_sort_by_it(client, seeded):
+    """列表要带上落库的分数与排名，并且能按分数排——前端排序就靠这两个字段。"""
+    from job_agent.core.matching import refresh
+
+    refresh(seeded.db, seeded.settings)
+    body = client.get("/api/jobs", params={"order": "score"}).json()
+    top = body["jobs"][0]
+    assert top["score"] is not None
+    assert top["scoreRank"] == 1
+    # 没抓 JD 的那条打不了分，必须排在最后而不是被丢掉
+    assert body["jobs"][-1]["score"] is None
+    assert len(body["jobs"]) == body["total"] == 2
+
+    only_scored = client.get("/api/jobs", params={"scored": True}).json()
+    assert only_scored["total"] == 1
+
+
+def test_stats_reports_score_freshness(client, seeded):
+    from job_agent.core.matching import refresh
+
+    before = client.get("/api/stats").json()["score"]
+    assert before["scored"] == 0 and before["missing"] == 1
+
+    refresh(seeded.db, seeded.settings)
+    after = client.get("/api/stats").json()["score"]
+    assert after["scored"] == 1 and after["missing"] == 0 and after["stale"] is False
+
+
 def test_jobs_list_and_filters(client, seeded):
     body = client.get("/api/jobs").json()
     assert body["total"] == 2
-    assert body["limit"] == 200
+    # 不分页：默认上限给满，两条全在响应里
+    assert len(body["jobs"]) == 2
+    assert "offset" not in body
 
     assert client.get("/api/jobs", params={"q": "安全"}).json()["total"] == 1
     assert client.get("/api/jobs", params={"min_salary": 100}).json()["total"] == 1
@@ -55,15 +85,22 @@ def test_jobs_list_and_filters(client, seeded):
     assert ordered["jobs"][0]["jobId"] == 1
 
 
-def test_jobs_pagination(client, seeded):
-    first = client.get("/api/jobs", params={"limit": 1, "offset": 0}).json()
-    second = client.get("/api/jobs", params={"limit": 1, "offset": 1}).json()
-    assert first["total"] == second["total"] == 2
-    assert first["jobs"][0]["jobId"] != second["jobs"][0]["jobId"]
+def test_jobs_truncation_is_visible(client, seeded):
+    """截断了必须能看出来：total 大于返回条数，前端才有机会说出来。"""
+    body = client.get("/api/jobs", params={"limit": 1}).json()
+    assert body["total"] == 2
+    assert len(body["jobs"]) == 1
+
+
+def test_jobs_offset_no_longer_does_anything(client, seeded):
+    """分页删掉了。offset 被 FastAPI 当未知参数忽略（不是报错），结果和不传一样。"""
+    with_offset = client.get("/api/jobs", params={"offset": 1}).json()
+    plain = client.get("/api/jobs").json()
+    assert [j["jobId"] for j in with_offset["jobs"]] == [j["jobId"] for j in plain["jobs"]]
 
 
 def test_invalid_query_param_is_422(client):
-    assert client.get("/api/jobs", params={"limit": 99999}).status_code == 422
+    assert client.get("/api/jobs", params={"limit": 10**7}).status_code == 422
     assert client.get("/api/jobs", params={"order": "random"}).status_code == 422
 
 

@@ -18,6 +18,7 @@ from job_agent.core.storage import (
     Database,
     DetailRepository,
     JobRepository,
+    ScoreRepository,
 )
 from job_agent.log import get_logger, setup_logging
 
@@ -33,6 +34,7 @@ class AppContext(BaseModel):
     jobs: JobRepository
     details: DetailRepository
     applications: ApplicationRepository
+    scores: ScoreRepository
 
     @classmethod
     def create(
@@ -68,6 +70,7 @@ class AppContext(BaseModel):
             jobs=JobRepository(db),
             details=DetailRepository(db),
             applications=ApplicationRepository(db),
+            scores=ScoreRepository(db),
         )
 
     def client(self) -> LiepinClient:

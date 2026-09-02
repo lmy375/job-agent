@@ -35,7 +35,7 @@ uv sync --extra dev          # 安装依赖
 uv run job config init       # 生成全局配置 config/config.toml（密钥填这里）
 uv run job profile new me    # 建一个 profile（简历、关键词、数据库都在它自己的目录里）
 uv run job search            # 采集职位（搜完自动抓 JD）
-uv run job score             # 按信号表给职位打分排序（分诊）
+uv run job score             # 按信号表重新打分、落库、排序（分诊）
 uv run job score -o data/shortlist.md   # 生成候选清单骨架
 uv run job web               # 打开 Web 管理台
 ```
@@ -74,14 +74,14 @@ profiles/              随人而变的那一半，整个目录不进版本库
     profile.toml       搜索条件与关键词 + [score] 匹配信号表（正负信号 + 权重）
     resume.md          你的简历
     preferences.md     求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
-    data/              jobs.db、shortlist.md（job score -o 的产物）、agent-plan.md
+    data/              jobs.db（含 job_scores 表）、shortlist.md、agent-plan.md
 src/job_agent/
   config/              配置加载与校验（TOML → 校验过的 Settings，密钥是 SecretStr）
   core/                核心能力，不依赖 CLI / Web
     liepin/            猎聘接口客户端（限速、错误码翻译、请求模型）
     storage/           SQLite：ORM 模型、仓储、轻量迁移
     services/          用例编排：search / detail / apply（带进度回调与取消）
-    matching/          按信号表打分排序 + 候选清单骨架（只分诊，不下结论）
+    matching/          按信号表打分排序、落库 + 候选清单骨架（只分诊，不下结论）
     resume/            PDF / DOCX / TXT 简历 → 纯文本
     dataset.py         jobs × job_details → 打分用的行集合（去重、薪资换算）
     jd_parser.py       详情页 → 结构化 JD（纯函数）
@@ -166,6 +166,7 @@ profile 这一层重复了一遍。想同时跑两条线就开两个 profile
 ```bash
 job search [-k 关键词]... [--pages N] [--limit N] [--retry-failed] [--no-detail] [--dry-run]
 job score [--floor 万] [-n N] [--why] [--json] [-o 路径] [--no-dedupe]
+           # 每次都是「按最新 [score] 重新打分并写进库」，不是只读
            # -o 的相对路径按 profile 目录解析；配 --json 就是把 JSON 写进文件
 job resume import <文件> [-o 输出路径] [--force]
 job apply <jobId>... [--job-kind 1|2] [--yes]

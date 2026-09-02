@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from job_agent.core.storage.database import Database
-from job_agent.core.storage.models import ApplicationRecord, Base, JobDetailRecord, JobRecord
+from job_agent.core.storage.models import (
+    ApplicationRecord,
+    Base,
+    JobDetailRecord,
+    JobRecord,
+    JobScoreRecord,
+)
 from job_agent.core.storage.repositories import (
     ApplicationRepository,
     DetailRepository,
     JobQuery,
     JobRepository,
+    ScoreRepository,
 )
 from job_agent.core.storage.rows import (
     ApplicationRow,
@@ -18,6 +25,8 @@ from job_agent.core.storage.rows import (
     KeywordCount,
     PendingDetail,
     SalarySummary,
+    ScoreEntry,
+    ScoreStatus,
 )
 
 __all__ = [
@@ -34,7 +43,11 @@ __all__ = [
     "JobRecord",
     "JobRepository",
     "JobRow",
+    "JobScoreRecord",
     "KeywordCount",
     "PendingDetail",
     "SalarySummary",
+    "ScoreEntry",
+    "ScoreRepository",
+    "ScoreStatus",
 ]

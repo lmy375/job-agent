@@ -55,7 +55,7 @@ uv run job -p <名字> stats                # 库里有多少数据、抓了多�
 ## 第 1 步：分诊
 
 ```bash
-uv run job -p <名字> score -n 30 --why
+uv run job -p <名字> score -n 30 --why    # 顺带把全库分数刷新落库
 ```
 
 `--why` 会打出每条的命中与扣分信号。扫一遍，判断**信号表本身准不准**：

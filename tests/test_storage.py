@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from conftest import make_detail, make_job
 from job_agent.core.storage import JobQuery
+from job_agent.core.storage.repositories import MAX_ROWS
 
 
 def test_upsert_dedupes_by_job_id(context):
@@ -33,7 +34,7 @@ def test_salary_band_none_when_unparseable(context):
     assert context.jobs.get(1).salaryHighWan is None
 
 
-def test_list_filters_and_pagination(context):
+def test_list_filters_and_limit(context):
     context.jobs.upsert_many(
         [
             make_job(1, jobName="AI Agent 工程师", salary="60-80k·15薪"),
@@ -48,11 +49,13 @@ def test_list_filters_and_pagination(context):
 
     page = context.jobs.find(JobQuery(order="salary", limit=2))
     assert page.total == 3
+    # 不分页，但 limit 仍然是兜底上限：截断时 total 大于返回条数，调用方能看出来
     assert len(page.items) == 2
     assert page.items[0].jobId == 3  # 标价最高
 
-    second = context.jobs.find(JobQuery(order="salary", limit=2, offset=2))
-    assert [j.jobId for j in second.items] == [2]
+    # 不给 limit 就是全给：默认上限远大于任何本地库的规模
+    everything = context.jobs.find(JobQuery(order="salary"))
+    assert [j.jobId for j in everything.items] == [3, 1, 2]
 
 
 def test_unparseable_salary_sorts_last(context):
@@ -64,10 +67,11 @@ def test_unparseable_salary_sorts_last(context):
 
 
 def test_limit_is_capped():
-    """分页参数在构造时就夹到合法区间，调用方不需要记得再归一一次。"""
-    assert JobQuery(limit=10**6).limit == 2000
+    """limit 在构造时就夹到合法区间，调用方不需要记得再归一一次。"""
+    assert JobQuery(limit=10**6).limit == MAX_ROWS
     assert JobQuery(limit=0).limit == 1
-    assert JobQuery(offset=-5).offset == 0
+    # 默认给满：不分页，一次全给
+    assert JobQuery().limit == MAX_ROWS
     # 空白关键词等于没填，不该变成「搜一个空串」
     assert JobQuery(keyword="  ", q="  ").keyword is None
 

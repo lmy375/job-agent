@@ -25,4 +25,5 @@ def overview(context: ContextDep) -> OverviewResponse:
         ),
         keywords=context.jobs.keyword_counts(),
         pendingDetails=len(context.jobs.missing_details()),
+        score=context.scores.status(context.settings.score.fingerprint),
     )

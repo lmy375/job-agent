@@ -25,6 +25,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -286,6 +288,25 @@ class ScoreConfig(_Model):
         if self.require.pattern is None:
             return None
         return re.compile(self.require.pattern, re.IGNORECASE)
+
+    @property
+    def fingerprint(self) -> str:
+        """影响分数的那部分配置的指纹，用来判断落库的分数过期没。
+
+        **只算真正参与打分的字段**：信号（名字 / 权重 / 正则，顺序也算）、
+        ``require``、``title_multiplier``。``salary_floor_wan`` 刻意不算——
+        它是看的时候的过滤条件，改了它分数一个都不变，不该让全库分数显示成过期。
+        """
+        payload = json.dumps(
+            {
+                "title_multiplier": self.title_multiplier,
+                "require": self.require.model_dump(mode="json"),
+                "signals": [s.model_dump(mode="json") for s in self.signals],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 class LangSmithConfig(_Model):

@@ -300,7 +300,7 @@ def test_help_lists_new_commands():
 def test_score_without_data_exits_nonzero(config_path):
     result = run(config_path, "score")
     assert result.exit_code == 1
-    assert "没有可排序的职位" in result.stdout
+    assert "打不了分" in result.stdout
 
 
 def test_score_lists_jobs(config_path, context):
@@ -332,10 +332,12 @@ def test_score_json_is_parseable(config_path, context):
 
 
 def test_score_floor_filters(config_path, context):
+    """门槛滤空时仍然要把分数写进库——刷新和「这次看什么」是两件事。"""
     seed_agent_job(context, salary="20-30k·12薪")  # 上限 36 万
     result = run(config_path, "score", "--floor", "135")
     assert result.exit_code == 1
-    assert "门槛太高" in result.stdout
+    assert "调低点" in result.stdout
+    assert context.scores.status(context.settings.score.fingerprint).scored == 1
 
 
 def test_score_without_signals_exits_with_config_error(config_path, profile_dir, context):

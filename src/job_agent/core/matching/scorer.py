@@ -1,4 +1,4 @@
-"""按信号表给职位打分排序。
+"""按信号表给职位打分排序，结果落库。
 
 **打分只做分诊**：把几百条砍到几十条，交给人或 skill 去读 JD 下判断。
 它不回答「该不该投」——「这个岗要 50 人管理经验而你带 5 人」这种判断
@@ -6,6 +6,11 @@
 
 因此这里刻意保留了每条命中/扣分的**理由**：排名本身不可信，
 理由才是让人能快速复核「为什么它排第一」的东西。
+
+分数与排名会写进 ``job_scores`` 表（:func:`refresh`），Web 端直接读库排序。
+**落库的是全量、未过滤的结果**：``--floor`` / ``-n`` / 去重都是看的时候的
+过滤条件，不该让同一条职位的名次随着看法变。所以
+``rank`` 恒定是「全库按分数降序的第几名」，视图过滤交给 :meth:`ScoreRefresh.view`。
 """
 
 from __future__ import annotations
@@ -13,8 +18,8 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from job_agent.config import ScoreConfig, Settings
-from job_agent.core.dataset import JobFacts, load_rows
-from job_agent.core.storage import Database
+from job_agent.core.dataset import JobFacts, dedupe_rows, load_rows
+from job_agent.core.storage import Database, ScoreEntry, ScoreRepository
 from job_agent.log import get_logger
 
 logger = get_logger(__name__)
@@ -103,30 +108,70 @@ def score_row(row: JobFacts, rules: ScoreConfig) -> ScoredJob:
     return scored
 
 
-def rank(
-    db: Database,
-    settings: Settings,
-    floor_wan: float | None = None,
-    dedupe: bool = True,
-) -> list[ScoredJob]:
-    """读库、打分、排序。信号表直接取自 ``settings.score``。
+class ScoreRefresh(BaseModel):
+    """一次刷新的结果：全库打完分、排好名、已落库。
 
-    ``floor_wan`` 过滤的是**薪资上限**而不是下限：JD 标的区间上限才代表
-    「这家最多能给到多少」，按下限过滤会把「50-80k·20薪」这种谈得上去的岗位误杀。
+    ``jobs`` 是**全量**（未去重、未按薪资过滤），按分数降序——``rank`` 就是下标 +1。
+    要拿「该看的那批」调 :meth:`view`。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    jobs: list[ScoredJob] = Field(default_factory=list)
+    #: 按 JD 正文去重后留下的 jobId。去重在刷新时算一次，view() 只做过滤，
+    #: 免得反复调 view() 把 dupes 越加越多
+    unique_ids: set[int] = Field(default_factory=set)
+    #: 这批分数用的 [score] 指纹
+    fingerprint: str = ""
+
+    def view(
+        self, settings: Settings, floor_wan: float | None = None, dedupe: bool = True
+    ) -> list[ScoredJob]:
+        """按「看的时候的条件」过滤：去重 + 薪资上限门槛。顺序沿用分数降序。
+
+        ``floor_wan`` 过滤的是**薪资上限**而不是下限：JD 标的区间上限才代表
+        「这家最多能给到多少」，按下限过滤会把「50-80k·20薪」这种谈得上去的岗位误杀。
+        """
+        threshold = floor_wan if floor_wan is not None else settings.score.salary_floor_wan
+        out = []
+        for job in self.jobs:
+            if dedupe and job.job_id not in self.unique_ids:
+                continue
+            high = job.salary_high
+            if threshold is not None and (high is None or high < threshold):
+                continue
+            out.append(job)
+        return out
+
+
+def refresh(db: Database, settings: Settings) -> ScoreRefresh:
+    """按当前 ``[score]`` 信号表给全库重新打分，写进 ``job_scores``。
+
+    每次都是**整表重写**：分数之间有关系（``rank`` 是全库排名），
+    只更新一部分留下的排名是错的，而且错得看不出来。
     """
     rules = settings.score
-    rows = load_rows(db, dedupe=dedupe)
-    threshold = floor_wan if floor_wan is not None else rules.salary_floor_wan
+    rows = load_rows(db, dedupe=False)
+    scored = [score_row(row, rules) for row in rows]
+    scored.sort(key=lambda s: (-s.score, -(s.salary_high or 0.0)))
 
-    out: list[ScoredJob] = []
-    skipped = 0
-    for row in rows:
-        high = row.salaryHigh
-        if threshold is not None and (high is None or high < threshold):
-            skipped += 1
-            continue
-        out.append(score_row(row, rules))
+    # 去重放在打分之后：它就地给存活的行打上 dupes，所以 ScoredJob.row.dupes 跟着对
+    unique = {row.jobId for row in dedupe_rows(rows)}
 
-    out.sort(key=lambda s: (-s.score, -(s.salary_high or 0.0)))
-    logger.debug("打分 %d 条，按薪资上限门槛滤掉 %d 条", len(out), skipped)
-    return out
+    fingerprint = rules.fingerprint
+    ScoreRepository(db).replace_all(
+        [
+            ScoreEntry(
+                jobId=job.job_id,
+                score=round(job.score, 2),
+                rank=index,
+                offTrack=job.off_track,
+                hits=[h.label() for h in job.hits],
+                penalties=[h.label() for h in job.penalties],
+            )
+            for index, job in enumerate(scored, 1)
+        ],
+        fingerprint,
+    )
+    logger.debug("刷新 %d 条分数，去重后 %d 条", len(scored), len(unique))
+    return ScoreRefresh(jobs=scored, unique_ids=unique, fingerprint=fingerprint)

@@ -111,11 +111,15 @@ def load_rows(db: Database, dedupe: bool = True) -> list[JobFacts]:
     logger.debug("载入 %d 条有效 JD（dedupe=%s）", len(rows), dedupe)
     if not dedupe:
         return rows
-    return _dedupe(rows)
+    return dedupe_rows(rows)
 
 
-def _dedupe(rows: list[JobFacts]) -> list[JobFacts]:
-    """同一 JD 被多家猎头挂出时，保留标价最高的那条，并记下重复次数。"""
+def dedupe_rows(rows: list[JobFacts]) -> list[JobFacts]:
+    """同一 JD 被多家猎头挂出时，保留标价最高的那条，并记下重复次数。
+
+    **就地改 ``dupes``**：传进来的对象本身会被打上重复次数，
+    所以打完分再调它，``ScoredJob.row.dupes`` 也跟着对——不需要再关联一次。
+    """
     best: dict[str, JobFacts] = {}
     for row in rows:
         key = jd_key(row.description)

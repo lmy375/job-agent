@@ -44,6 +44,17 @@ class JobRow(BaseModel):
     searchKeyword: str = ""
     searchTime: datetime
 
+    # ---- 以下来自 job_scores（LEFT JOIN，没打分就整块是 None / 空）
+    #: `job score` 算出的分数
+    score: float | None = None
+    #: 全库密集排名（按分数降序，1 起），与看的时候的过滤条件无关
+    scoreRank: int | None = None
+    #: 职位名与 JD 都没命中 [score.require].pattern
+    offTrack: bool | None = None
+    scoreHits: list[str] = Field(default_factory=list)
+    scorePenalties: list[str] = Field(default_factory=list)
+    scoredAt: datetime | None = None
+
 
 class JobDetailRow(ParsedDetail):
     """``job_details`` 表的一行：解析出的 JD 字段 + 落库时才有的身份与状态。
@@ -111,3 +122,34 @@ class SalarySummary(BaseModel):
     meetsFloor: int = 0
     meetsFloorPct: float = 0.0
     avgHighWan: float
+
+
+class ScoreEntry(BaseModel):
+    """一条要落库的打分结果。仓储收它，不收裸 dict。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    jobId: int
+    score: float
+    rank: int
+    offTrack: bool = False
+    hits: list[str] = Field(default_factory=list)
+    penalties: list[str] = Field(default_factory=list)
+
+
+class ScoreStatus(BaseModel):
+    """落库分数的新鲜度。``job stats`` 与 Web 概览靠它提醒「该重新打分了」。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: 已打分的条数
+    scored: int = 0
+    #: 有 JD、却还没打分的条数（采完新数据没跑 job score 就会有）
+    missing: int = 0
+    #: 落库分数用的信号表指纹与当前配置不一致 = 改过 [score] 但没重新打分
+    stale: bool = False
+    scoredAt: datetime | None = None
+
+    @property
+    def fresh(self) -> bool:
+        return self.scored > 0 and self.missing == 0 and not self.stale

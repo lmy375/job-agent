@@ -14,15 +14,30 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 from job_agent.config import ConfigPaths, Settings
-from job_agent.core.storage import ApplicationRow, JobRow, KeywordCount, SalarySummary
-from job_agent.core.storage.repositories import MAX_PAGE_SIZE
+from job_agent.core.storage import (
+    ApplicationRow,
+    JobRow,
+    KeywordCount,
+    SalarySummary,
+    ScoreStatus,
+)
+from job_agent.core.storage.repositories import MAX_ROWS
 
 
 class JobListResponse(BaseModel):
-    total: int = Field(description="满足筛选条件的总条数（不受分页影响）")
-    limit: int
-    offset: int
+    """职位列表。**不分页**——本地单人用、职位数有限，一次全给前端。
+
+    ``limit`` 只是「别让一次响应大到离谱」的兜底。真被截断时
+    ``total > len(jobs)``，前端必须把这件事显示出来，不能装作全给了。
+    """
+
+    total: int = Field(description="满足筛选条件的总条数")
+    limit: int = Field(description="本次上限（兜底，不是页大小）")
     jobs: list[JobRow]
+
+    @property
+    def truncated(self) -> bool:
+        return self.total > len(self.jobs)
 
 
 class KeywordsResponse(BaseModel):
@@ -67,6 +82,9 @@ class OverviewResponse(BaseModel):
     salary: SalarySummary
     keywords: list[KeywordCount]
     pendingDetails: int = Field(description="还没抓过详情的职位数")
+    score: ScoreStatus = Field(
+        description="落库分数的新鲜度：改过 [score] 或采了新数据就该重跑 job score"
+    )
 
 
 class HealthResponse(BaseModel):
@@ -116,7 +134,7 @@ class TaskParams(BaseModel):
         default=True, description="仅 search：搜完接着抓 JD。默认开——没有 JD 的库没法打分"
     )
     limit: int | None = Field(
-        default=None, ge=1, le=MAX_PAGE_SIZE, description="抓 JD 时本次最多抓多少条"
+        default=None, ge=1, le=MAX_ROWS, description="抓 JD 时本次最多抓多少条"
     )
     retry_failed: bool = Field(default=False, description="抓 JD 时连之前失败的一起重试")
 

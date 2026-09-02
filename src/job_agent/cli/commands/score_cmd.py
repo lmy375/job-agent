@@ -1,7 +1,13 @@
-"""``job score``：按当前 profile 的 ``[score]`` 信号表给库里的职位分诊排序。
+"""``job score``：按当前 profile 的 ``[score]`` 信号表**重新给全库打分**并落库。
+
+每次都是刷新：读 ``[score]`` 现在的样子，算一遍全库，整表重写 ``job_scores``。
+改了权重就再跑一次，Web 端和后续命令读到的都是新分数。
 
 打分是**确定性**的：同一份数据、同一份信号表，两次跑出来的分数与排序完全一样。
 「该不该投」那一步是判断，归 ``/job-match`` skill，不在这里。
+
+落库的是**全量、未过滤**的分数与全库排名；``--floor`` / ``-n`` / 去重只影响
+这次**看到**什么，不影响写进库里的名次。
 
 输出形式两个维度正交，共用同一次打分，所以排序必然一致：
 
@@ -23,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from job_agent.cli.state import CliState, echo_ok, echo_warn
 from job_agent.config import Settings
-from job_agent.core.matching import ScoredJob, rank, render_shortlist
+from job_agent.core.matching import ScoredJob, refresh, render_shortlist
 from job_agent.core.matching.shortlist import TODO, write_shortlist
 
 #: 终端默认只列这么多；再多就该写进文件（-o）或看 job web 了
@@ -37,6 +43,8 @@ class ScoreJson(BaseModel):
 
     jobId: int
     score: float
+    #: 全库排名（按分数降序，1 起）；与 --floor / -n 无关
+    rank: int
     title: str
     company: str
     salary: str
@@ -95,12 +103,18 @@ def score(
         )
         raise typer.Exit(code=2)
 
-    jobs = rank(context.db, settings, floor_wan=floor, dedupe=not no_dedupe)
+    result = refresh(context.db, settings)
+    jobs = result.view(settings, floor_wan=floor, dedupe=not no_dedupe)
 
+    if not result.jobs:
+        echo_warn(
+            "库里没有带 JD 的职位，打不了分。先跑 job search（搜完会自动抓 JD）。"
+        )
+        raise typer.Exit(code=1)
     if not jobs:
         echo_warn(
-            "没有可排序的职位。先跑 job search（搜完会自动抓 JD）；"
-            "如果库里有数据，可能是 --floor / [score].salary_floor_wan 门槛太高。"
+            f"已给 {len(result.jobs)} 条打分入库，但没有一条过得了当前门槛——"
+            "--floor / [score].salary_floor_wan 调低点再看。"
         )
         raise typer.Exit(code=1)
 
@@ -108,8 +122,10 @@ def score(
     # 这一层和 [storage].database 那些配置路径是同一个口径，别按 cwd 解析
     target = None if output is None else settings.profile_dir / output
 
+    ranks = {job.job_id: i for i, job in enumerate(result.jobs, 1)}
     if as_json:
-        blob = _SCORE_JSON.dump_json([_as_json(j) for j in jobs[:limit]], indent=2).decode()
+        payload = [_as_json(j, ranks[j.job_id]) for j in jobs[:limit]]
+        blob = _SCORE_JSON.dump_json(payload, indent=2).decode()
         if target is None:
             typer.echo(blob)
         else:
@@ -122,6 +138,8 @@ def score(
 
     threshold = floor if floor is not None else settings.score.salary_floor_wan
     scope = f"薪资上限 ≥ {threshold:.0f} 万" if threshold is not None else "全部"
+    echo_ok(f"已重新打分并入库：{len(result.jobs)} 条（信号表指纹 {result.fingerprint}）")
+    typer.echo("")
     typer.secho(f"{scope}：{len(jobs)} 条，按分数排序（前 {min(limit, len(jobs))} 条）", bold=True)
     typer.secho(
         "  分数只做分诊，不代表结论——该不该投要读 JD，跑 /job-match。",
@@ -141,7 +159,7 @@ def score(
 
     typer.echo(
         "\n下一步：job score -n 12 -o data/shortlist.md 生成候选清单骨架，"
-        "再跑 /job-match 让 Claude 逐条读 JD。"
+        "再跑 /job-match 让 Claude 逐条读 JD；或 job web 在页面上按分数翻。"
     )
 
 
@@ -191,11 +209,12 @@ def _clip(text: str, width: int) -> str:
     return "".join(out)
 
 
-def _as_json(job: ScoredJob) -> ScoreJson:
+def _as_json(job: ScoredJob, rank: int) -> ScoreJson:
     row = job.row
     return ScoreJson(
         jobId=job.job_id,
         score=round(job.score, 1),
+        rank=rank,
         title=job.title,
         company=job.company,
         salary=row.salary,
