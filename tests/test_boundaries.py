@@ -13,6 +13,8 @@
 不许 ``@dataclass`` / ``NamedTuple``——两套写法并存，读代码的人每次都要先
 分辨「这个能不能校验、怎么序列化」。
 
+前端那边同理钉两条：源码一律 TypeScript、包管理器一律 pnpm。
+
 纯 AST 扫描、不真正 import——agent extra 没装时这组测试也必须能跑。
 """
 
@@ -23,7 +25,12 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "job_agent"
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src" / "job_agent"
+FRONTEND = ROOT / "frontend"
+
+#: 扫前端源码时要跳过的目录：装出来的与构建出来的，里面全是 .js
+FRONTEND_IGNORED = {"node_modules", "dist"}
 
 #: 唯一的跨路线入口：文件 -> 它被允许 import 的模块（精确匹配，不含子模块）
 ALLOWED_BRIDGE: dict[str, tuple[str, ...]] = {
@@ -187,3 +194,50 @@ def test_config_files_have_no_overlapping_sections() -> None:
         "profile_name", "profile_dir", "profile_file"
     }
     assert composed == global_sections | profile_sections
+
+
+def _frontend_files() -> list[Path]:
+    """前端**自己写的**文件（跳过 node_modules 与 dist）。"""
+    return [
+        f
+        for f in sorted(FRONTEND.rglob("*"))
+        if f.is_file()
+        and not FRONTEND_IGNORED & set(f.relative_to(FRONTEND).parts)
+    ]
+
+
+def test_frontend_is_typescript_only() -> None:
+    """前端源码一律 TypeScript（CLAUDE.md 硬规则）。
+
+    留一个 ``.jsx`` 在里面不会报错、只是那个文件从此不再被 ``tsc`` 检查——
+    「后端改了字段编译期会喊」这条承诺就在那一个文件上悄悄失效了。
+    """
+    if not FRONTEND.is_dir():
+        pytest.skip("没有 frontend/")
+    offenders = [
+        str(f.relative_to(ROOT))
+        for f in _frontend_files()
+        if f.suffix in {".js", ".jsx", ".mjs", ".cjs"}
+    ]
+    assert not offenders, (
+        "前端源码一律 TypeScript：组件用 .tsx，其余用 .ts（vite.config.ts 也是）。\n"
+        "这几个文件不在 tsc 的检查范围里：\n" + "\n".join(offenders)
+    )
+
+
+def test_frontend_uses_pnpm() -> None:
+    """包管理器一律 pnpm——两份锁文件并存就等于两套依赖树。"""
+    if not (FRONTEND / "package.json").is_file():
+        pytest.skip("没有 frontend/package.json")
+    strays = [
+        name
+        for name in ("package-lock.json", "yarn.lock", "bun.lockb")
+        if (FRONTEND / name).is_file()
+    ]
+    assert not strays, (
+        f"前端只用 pnpm，删掉这些别家的锁文件：{strays}（保留 pnpm-lock.yaml）。"
+    )
+    assert '"packageManager"' in (FRONTEND / "package.json").read_text(encoding="utf-8"), (
+        "package.json 里要写 packageManager 字段（pnpm@<版本>），"
+        "让 corepack 与 CI 用同一个版本装依赖。"
+    )

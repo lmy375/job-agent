@@ -1,23 +1,26 @@
 import { useEffect, useState } from "react";
-import { api } from "./api.js";
-import JobsView from "./components/JobsView.jsx";
-import TasksView from "./components/TasksView.jsx";
-import OverviewView from "./components/OverviewView.jsx";
+import { api, errorMessage } from "./api";
+import JobsView from "./components/JobsView";
+import TasksView from "./components/TasksView";
+import OverviewView from "./components/OverviewView";
+import type { ConfigPaths, HealthResponse } from "./types";
 
-const TABS = [
+type TabKey = "jobs" | "tasks" | "overview";
+
+const TABS: { key: TabKey; label: string }[] = [
   { key: "jobs", label: "职位" },
   { key: "tasks", label: "采集任务" },
   { key: "overview", label: "数据概览" },
 ];
 
 export default function App() {
-  const [tab, setTab] = useState("jobs");
-  const [health, setHealth] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const [tab, setTab] = useState<TabKey>("jobs");
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [profile, setProfile] = useState<ConfigPaths | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.health().then(setHealth).catch((e) => setError(e.message));
+    api.health().then(setHealth).catch((e: unknown) => setError(errorMessage(e)));
     // 一次只服务一个 profile（job web -p <名字>）。顶栏必须显示是谁的数据：
     // 几个 profile 的界面长得一模一样，看错了会把别人的岗位当成自己的
     api.config().then((c) => setProfile(c.paths)).catch(() => {});

@@ -3,7 +3,7 @@
 .DEFAULT_GOAL := help
 UV ?= uv
 
-.PHONY: help install test lint typecheck check frontend run clean
+.PHONY: help install test lint typecheck typecheck-web check frontend run clean
 
 help: ## 显示本帮助
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -11,7 +11,7 @@ help: ## 显示本帮助
 
 install: ## 安装 Python 与前端依赖
 	$(UV) sync --extra dev
-	cd frontend && npm install
+	cd frontend && pnpm install
 
 test: ## 跑测试
 	$(UV) run pytest
@@ -22,10 +22,13 @@ lint: ## 静态检查（ruff）
 typecheck: ## 类型检查（mypy）
 	$(UV) run mypy
 
-check: lint typecheck test ## 提交前跑这个
+typecheck-web: ## 前端类型检查（tsc）
+	cd frontend && pnpm typecheck
+
+check: lint typecheck typecheck-web test ## 提交前跑这个
 
 frontend: ## 构建前端
-	cd frontend && npm run build
+	cd frontend && pnpm build
 
 run: frontend ## 构建前端并启动 Web 管理台
 	$(UV) run job web

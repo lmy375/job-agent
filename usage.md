@@ -216,7 +216,7 @@ uv run job web --no-browser --skip-build   # 只起 API（前端不构建）
 - **采集任务**：页面上发起搜索 / 抓详情，实时看进度与日志，可取消
 - **数据概览**：库存计数、薪资水位、当前配置与路径
 
-API 文档在 `/docs`。前端开发：`cd frontend && npm run dev`（5173，`/api` 自动代理）。
+API 文档在 `/docs`。前端开发：`cd frontend && pnpm dev`（5173，`/api` 自动代理）。
 
 ### 它最适合的两件事
 

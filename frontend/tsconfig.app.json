@@ -1,0 +1,27 @@
+{
+  // 浏览器侧（src/）。strict 全开：接口字段可能为 null 是后端模型里写明的事
+  // （score / scoreRank / detail 都是 `| None`），漏判就是页面上渲染出 NaN 与空白。
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["vite/client"],
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+
+    // 只做类型检查，产物由 vite（esbuild）出
+    "noEmit": true,
+    "composite": true,
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}

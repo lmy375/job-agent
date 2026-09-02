@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { api } from "../api.js";
-import { formatTime } from "../format.js";
+import { api, errorMessage } from "../api";
+import { formatTime } from "../format";
+import type { TaskDetail, TaskKind, TaskParamsInput, TaskStatus, TaskView } from "../types";
 
 const POLL_MS = 2000;
 
-const STATUS_LABEL = {
+const STATUS_LABEL: Record<TaskStatus, string> = {
   pending: "排队中",
   running: "执行中",
   succeeded: "已完成",
@@ -12,15 +13,27 @@ const STATUS_LABEL = {
   cancelled: "已取消",
 };
 
-const KIND_LABEL = { search: "搜索职位", detail: "抓取详情" };
+const KIND_LABEL: Record<TaskKind, string> = { search: "搜索职位", detail: "抓取详情" };
+
+//: 到了这几个状态就没什么可取消的了
+const FINAL_STATUSES: TaskStatus[] = ["succeeded", "failed", "cancelled"];
+
+/** 表单里的值。数字项都存成字符串（直接绑在 input 上），提交时才转。 */
+interface Form {
+  keywords: string;
+  pages: string;
+  limit: string;
+  retryFailed: boolean;
+  fetchDetail: boolean;
+}
 
 export default function TasksView() {
-  const [tasks, setTasks] = useState([]);
-  const [running, setRunning] = useState(null);
-  const [selected, setSelected] = useState(null);
-  const [detail, setDetail] = useState(null);
+  const [tasks, setTasks] = useState<TaskView[]>([]);
+  const [running, setRunning] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<Form>({
     keywords: "",
     pages: "",
     limit: "",
@@ -34,9 +47,9 @@ export default function TasksView() {
       const data = await api.tasks();
       setTasks(data.tasks);
       setRunning(data.running);
-      if (selected) setDetail(await api.task(selected));
+      if (selected) setDetail((await api.task(selected)).task);
     } catch (e) {
-      setError(e.message);
+      setError(errorMessage(e));
     }
   }, [selected]);
 
@@ -48,9 +61,9 @@ export default function TasksView() {
     return () => clearInterval(timer);
   }, [refresh, running, selected]);
 
-  const submit = async (kind) => {
+  const submit = async (kind: TaskKind) => {
     setError("");
-    const params = {};
+    const params: TaskParamsInput = {};
     if (kind === "search") {
       const keywords = form.keywords
         .split(/[,，\s]+/)
@@ -64,23 +77,22 @@ export default function TasksView() {
       if (form.limit) params.limit = Number(form.limit);
       params.retry_failed = form.retryFailed;
     }
-    const payload = { kind, params };
     try {
-      const data = await api.createTask(payload);
+      const data = await api.createTask({ kind, params });
       setSelected(data.task.id);
       refresh();
     } catch (e) {
-      setError(e.message);
+      setError(errorMessage(e));
     }
   };
 
-  const cancel = async (taskId) => {
+  const cancel = async (taskId: string) => {
     if (!window.confirm("取消任务？已完成的进度都已入库，重跑会自动续上。")) return;
     try {
       await api.cancelTask(taskId);
       refresh();
     } catch (e) {
-      setError(e.message);
+      setError(errorMessage(e));
     }
   };
 
@@ -179,7 +191,7 @@ export default function TasksView() {
                   </span>
                 </td>
                 <td className="progress-cell">
-                  {task.percent !== null && task.percent !== undefined ? (
+                  {task.percent !== null ? (
                     <>
                       <div className="progress">
                         <div className="progress-fill" style={{ width: `${task.percent}%` }} />
@@ -198,7 +210,7 @@ export default function TasksView() {
                   <button className="btn small ghost" onClick={() => setSelected(task.id)}>
                     日志
                   </button>
-                  {!["succeeded", "failed", "cancelled"].includes(task.status) && (
+                  {!FINAL_STATUSES.includes(task.status) && (
                     <button className="btn small" onClick={() => cancel(task.id)}>
                       取消
                     </button>
@@ -217,19 +229,16 @@ export default function TasksView() {
         </table>
       </div>
 
-      {selected && detail?.task && (
+      {selected && detail && (
         <section className="panel logs">
           <h3>
-            任务 {detail.task.id} · {KIND_LABEL[detail.task.kind]} ·{" "}
-            {STATUS_LABEL[detail.task.status]}
+            任务 {detail.id} · {KIND_LABEL[detail.kind]} · {STATUS_LABEL[detail.status]}
             <button className="btn small ghost" onClick={() => setSelected(null)}>
               关闭
             </button>
           </h3>
-          {detail.task.result && (
-            <pre className="result">{JSON.stringify(detail.task.result, null, 2)}</pre>
-          )}
-          <pre className="log">{(detail.task.logs || []).join("\n") || "（暂无日志）"}</pre>
+          {detail.result && <pre className="result">{JSON.stringify(detail.result, null, 2)}</pre>}
+          <pre className="log">{detail.logs.join("\n") || "（暂无日志）"}</pre>
         </section>
       )}
     </>

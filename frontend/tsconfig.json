@@ -1,0 +1,6 @@
+{
+  // 两份工程：src/ 跑在浏览器里，vite.config.ts 跑在 Node 里，
+  // lib 与 module 解析都不一样，所以分开引用而不是塞成一份。
+  "files": [],
+  "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.node.json" }]
+}

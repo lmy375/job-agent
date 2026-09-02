@@ -89,7 +89,7 @@ src/job_agent/
   cli/                 typer 子命令（执行路线一：人或 skill 驱动）
   web/                 FastAPI 管理后端 + 后台任务
   agent/               LangGraph 独立执行（执行路线二）
-frontend/              React（Vite）管理台，构建到 frontend/dist 由后端托管
+frontend/              React + TypeScript（Vite / pnpm）管理台，构建到 frontend/dist 由后端托管
 scripts/               一次性脚本（导出、关键词覆盖率核对）
 tests/                 pytest（不碰真实库、不发网络请求）
 .claude/skills/
@@ -352,7 +352,9 @@ API 文档在 `/docs`。后台任务**只有一个 worker**：猎聘限流按 to
 配置在 Web 端**只读**：配置是文件，改文件比在网页上改更可靠、可进版本库，
 也不会出现「网页上改了但下次 CLI 跑的是另一套」。
 
-前端开发：`cd frontend && npm run dev`（5173 端口，`/api` 自动代理到 18000）。
+前端开发：`cd frontend && pnpm dev`（5173 端口，`/api` 自动代理到 18000）。
+包管理器是 **pnpm**，源码**一律 TypeScript**——接口字段抄在 `src/types.ts`，
+后端改了字段 `pnpm typecheck` 会指到真正用它的那一行（见「开发」一节）。
 
 ## 详情页抓取
 
@@ -403,10 +405,16 @@ JD 来自详情页里的 `<script type="application/ld+json">` **JobPosting** �
 ## 开发
 
 ```bash
-make check      # ruff + mypy + pytest
+make install    # uv sync + pnpm install（前端用 pnpm，不用 npm）
+make check      # ruff + mypy + tsc + pytest
 make test
 uv run pytest tests/test_matching.py -v
 ```
+
+前端源码**全是 TypeScript**（`.ts` / `.tsx`，没有 `.js`）。接口字段抄在
+`frontend/src/types.ts` 里，一一对应 `web/schemas.py` 与 `core/storage/rows.py`
+的 pydantic 模型——**后端改了字段这里就得跟着改**，`make check` 里的 `tsc`
+会把报错落在真正用到它的那一行，而不是等页面上渲染出空白。
 
 测试不碰真实的 `jobs.db`，也不发任何网络请求：每个用例在临时目录里搭一套
 完整的 `config/` + `data/`，顺便验证了「换一个项目根目录也能跑」。

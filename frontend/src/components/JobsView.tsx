@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "../api.js";
-import { formatTime } from "../format.js";
+import { api, errorMessage } from "../api";
+import type { JobsQuery } from "../api";
+import { formatTime } from "../format";
+import type { JobBundle, JobListResponse, JobRow, KeywordCount } from "../types";
 
 /**
  * 职位列表。
@@ -10,8 +12,32 @@ import { formatTime } from "../format.js";
  * 后端只在「命中数超过兜底上限」时才截断，那种情况下面会明说。
  */
 
+//: 可排序列的 key。写成联合类型而不是 string：排序状态里放了个不存在的列名，
+//: 表现是「点了表头没反应」，编译期拦下来比在页面上找原因快
+type SortKey =
+  | "scoreRank"
+  | "score"
+  | "jobName"
+  | "company"
+  | "location"
+  | "salary"
+  | "education"
+  | "workYears"
+  | "searchKeyword";
+
+//: 用来比较的值。null / undefined / 空串一律沉底，见下面的 sorted
+type SortValue = string | number | null | undefined;
+
+interface Column {
+  key: SortKey;
+  label: string;
+  get: (job: JobRow) => SortValue;
+  numeric?: boolean;
+  className?: string;
+}
+
 //: 可点击排序的列。`get` 取出用来比较的值，null / undefined 一律排最后
-const COLUMNS = [
+const COLUMNS: Column[] = [
   { key: "scoreRank", label: "#", get: (j) => j.scoreRank, numeric: true, className: "rank" },
   { key: "score", label: "分", get: (j) => j.score, numeric: true, className: "score" },
   { key: "jobName", label: "职位", get: (j) => j.jobName },
@@ -24,11 +50,27 @@ const COLUMNS = [
 ];
 
 //: 后端排序只决定「被截断时留下哪些」，细排序在前端做
-const FETCH_ORDER = "score";
+const FETCH_ORDER = "score" as const;
+
+/** 筛选条件都存成字符串：它们直接绑在 input / select 上，空串 = 不筛。 */
+interface Filters {
+  keyword: string;
+  q: string;
+  min_salary: string;
+  has_detail: string;
+  applied: string;
+}
+
+interface Sort {
+  key: SortKey;
+  desc: boolean;
+}
+
+const EMPTY: JobListResponse = { total: 0, limit: 0, jobs: [] };
 
 export default function JobsView() {
-  const [keywords, setKeywords] = useState([]);
-  const [filters, setFilters] = useState({
+  const [keywords, setKeywords] = useState<KeywordCount[]>([]);
+  const [filters, setFilters] = useState<Filters>({
     keyword: "",
     q: "",
     min_salary: "",
@@ -36,13 +78,13 @@ export default function JobsView() {
     applied: "",
   });
   //: 排序状态：列 key + 方向。默认按分数从高到低（分诊结果就是拿来这么看的）
-  const [sort, setSort] = useState({ key: "score", desc: true });
-  const [data, setData] = useState({ total: 0, limit: 0, jobs: [] });
+  const [sort, setSort] = useState<Sort>({ key: "score", desc: true });
+  const [data, setData] = useState<JobListResponse>(EMPTY);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState(null);
-  const [detail, setDetail] = useState(null);
-  const [applying, setApplying] = useState(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [detail, setDetail] = useState<JobBundle | null>(null);
+  const [applying, setApplying] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
@@ -52,10 +94,11 @@ export default function JobsView() {
   const load = useCallback(() => {
     setLoading(true);
     setError("");
+    const params: JobsQuery = { ...filters, order: FETCH_ORDER };
     api
-      .jobs({ ...filters, order: FETCH_ORDER })
+      .jobs(params)
       .then(setData)
-      .catch((e) => setError(e.message))
+      .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setLoading(false));
   }, [filters]);
 
@@ -65,9 +108,9 @@ export default function JobsView() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  const update = (patch) => setFilters((prev) => ({ ...prev, ...patch }));
+  const update = (patch: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...patch }));
 
-  const toggleSort = (key) => {
+  const toggleSort = (key: SortKey) => {
     setSort((prev) => {
       if (prev.key !== key) {
         // 换列时给个合理的初始方向：分数、薪资、名次这类数字列先看「最靠前的」
@@ -89,12 +132,12 @@ export default function JobsView() {
       const xMissing = x === null || x === undefined || x === "";
       const yMissing = y === null || y === undefined || y === "";
       if (xMissing || yMissing) return xMissing && yMissing ? 0 : xMissing ? 1 : -1;
-      if (column.numeric) return (x - y) * dir;
+      if (column.numeric) return (Number(x) - Number(y)) * dir;
       return String(x).localeCompare(String(y), "zh") * dir;
     });
   }, [data.jobs, sort]);
 
-  const toggleDetail = async (jobId) => {
+  const toggleDetail = async (jobId: number) => {
     if (expanded === jobId) {
       setExpanded(null);
       return;
@@ -104,11 +147,11 @@ export default function JobsView() {
     try {
       setDetail(await api.job(jobId));
     } catch (e) {
-      setError(e.message);
+      setError(errorMessage(e));
     }
   };
 
-  const applyJob = async (job) => {
+  const applyJob = async (job: JobRow) => {
     // 投递不可撤销，必须先确认
     const ok = window.confirm(
       `确认投递？\n\n${job.jobName}\n${job.company} · ${job.salary}\n\n` +
@@ -122,7 +165,7 @@ export default function JobsView() {
       setNotice(`[${job.jobId}] ${result.message}`);
       load();
     } catch (e) {
-      setError(e.message);
+      setError(errorMessage(e));
     } finally {
       setApplying(null);
     }
@@ -223,7 +266,7 @@ export default function JobsView() {
                 <tr className={job.offTrack ? "off-track" : undefined}>
                   <td className="rank">{job.scoreRank ?? "—"}</td>
                   <td className="score">
-                    {job.score === null || job.score === undefined ? (
+                    {job.score === null ? (
                       <span className="muted" title="还没打分：抓到 JD 后跑 job score">
                         —
                       </span>
@@ -235,7 +278,7 @@ export default function JobsView() {
                     <button className="link" onClick={() => toggleDetail(job.jobId)}>
                       {job.jobName}
                     </button>
-                    {job.companyTags?.length > 0 && (
+                    {job.companyTags.length > 0 && (
                       <span className="tags">
                         {job.companyTags.slice(0, 3).map((t) => (
                           <span key={t} className="tag">
@@ -299,31 +342,35 @@ export default function JobsView() {
 }
 
 /** 悬停时把命中/扣分理由摆出来：分数本身不可信，理由才让人能复核排序。 */
-function scoreTitle(job) {
-  const lines = [];
-  if (job.scoreHits?.length) lines.push(`+ ${job.scoreHits.join("、")}`);
-  if (job.scorePenalties?.length) lines.push(`− ${job.scorePenalties.join("、")}`);
+function scoreTitle(job: JobRow): string {
+  const lines: string[] = [];
+  if (job.scoreHits.length) lines.push(`+ ${job.scoreHits.join("、")}`);
+  if (job.scorePenalties.length) lines.push(`− ${job.scorePenalties.join("、")}`);
   if (job.scoredAt) lines.push(`打分时间：${formatTime(job.scoredAt)}`);
   return lines.join("\n") || "无命中信号";
 }
 
-function JobDetail({ detail }) {
+function JobDetail({ detail }: { detail: JobBundle }) {
   const jd = detail.detail;
+  // 解构出来 TS 才能顺着 `score !== null` 收窄类型。score / scoreRank / hits
+  // 是同一次 job score 一起落库的，有命中信号就一定有分数
+  const { score } = detail;
+  const hasSignals = detail.scoreHits.length > 0 || detail.scorePenalties.length > 0;
   return (
     <div className="jd">
-      {(detail.scoreHits?.length > 0 || detail.scorePenalties?.length > 0) && (
+      {score !== null && hasSignals && (
         <div className="jd-meta">
           <span>
-            分 {Math.round(detail.score)} · 全库第 {detail.scoreRank} 名
+            分 {Math.round(score)} · 全库第 {detail.scoreRank} 名
           </span>
-          {detail.scoreHits?.length > 0 && <span>命中：{detail.scoreHits.join("、")}</span>}
-          {detail.scorePenalties?.length > 0 && (
+          {detail.scoreHits.length > 0 && <span>命中：{detail.scoreHits.join("、")}</span>}
+          {detail.scorePenalties.length > 0 && (
             <span>扣分：{detail.scorePenalties.join("、")}</span>
           )}
           <span className="muted">分数只做分诊，该不该投要读下面的 JD</span>
         </div>
       )}
-      {detail.applications?.length > 0 && (
+      {detail.applications.length > 0 && (
         <div className="alert">
           投递记录：
           {detail.applications.map((a) => (

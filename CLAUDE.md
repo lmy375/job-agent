@@ -259,6 +259,15 @@ job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守
   `/api/jobs` 一次全给，排序在浏览器里做（点表头即时重排）。`limit` 只是
   「别让一次响应大到离谱」的兜底，真截断了响应里 `total > len(jobs)`，
   前端必须把这件事显示出来——静默截断会让人以为看到的就是全部。
+- **前端一律 TypeScript，包管理器一律 pnpm。** `frontend/` 下不许出现 `.js` /
+  `.jsx`（构建产物 `dist/` 除外）——组件是 `.tsx`，其余是 `.ts`，连
+  `vite.config.ts` 也是。装包只用 pnpm（`pnpm-lock.yaml` 进版本库，
+  没有 `package-lock.json`）；`job web` 与 Makefile 调的都是 `pnpm`。
+  接口字段抄在 `frontend/src/types.ts` 里，一一对应 `web/schemas.py` 与
+  `core/storage/rows.py` 的 pydantic 模型：后端可空（`| None`）的字段在那边
+  就是 `| null`，`tsc` 会逼着判一次。这是「接口不做向后兼容」的配套——
+  字段改了必须有人在编译期喊，靠人肉搜前端引用一定会漏。
+  `pnpm build` 里带 `tsc`：类型不过就不出产物。
 - **不做向后兼容——数据库与接口都不做。**
   库结构变了就 `job db reset` 删库重建（不写迁移、不补列、不回填、不容忍 NULL 老列）；
   接口字段改了就同步改前端，不留兼容分支。
@@ -286,8 +295,10 @@ job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守
 ## 开发
 
 ```bash
-uv sync --extra dev
+make install       # uv sync --extra dev + pnpm install（前端）
 make lint          # ruff + mypy
+make typecheck-web # 前端 tsc
 make test          # pytest
+make check         # 提交前跑这个：以上全部
 uv run job --help
 ```

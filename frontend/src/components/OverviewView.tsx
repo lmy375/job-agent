@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { api } from "../api.js";
-import { formatTime } from "../format.js";
+import { api, errorMessage } from "../api";
+import { formatTime } from "../format";
+import type { ConfigResponse, OverviewResponse, ScoreStatus } from "../types";
 
 /** 落库分数的新鲜度：过期或有漏打的必须说出来，不能让人把旧分数当成现在的。 */
-function scoreNote(score) {
+function scoreNote(score: ScoreStatus): { text: string; warn: boolean } {
   if (score.scored === 0) return { text: "还没打过分——跑 job score", warn: true };
   if (score.stale) return { text: "[score] 改过但没重新打分——跑 job score", warn: true };
   if (score.missing > 0)
@@ -12,15 +13,15 @@ function scoreNote(score) {
 }
 
 export default function OverviewView() {
-  const [stats, setStats] = useState(null);
-  const [config, setConfig] = useState(null);
+  const [stats, setStats] = useState<OverviewResponse | null>(null);
+  const [config, setConfig] = useState<ConfigResponse | null>(null);
   // /api/config 返回 { settings, paths }：settings 就是脱敏后的配置树
   const settings = config?.settings;
   const [error, setError] = useState("");
 
   useEffect(() => {
-    api.stats().then(setStats).catch((e) => setError(e.message));
-    api.config().then(setConfig).catch((e) => setError(e.message));
+    api.stats().then(setStats).catch((e: unknown) => setError(errorMessage(e)));
+    api.config().then(setConfig).catch((e: unknown) => setError(errorMessage(e)));
   }, []);
 
   return (
@@ -54,7 +55,7 @@ export default function OverviewView() {
         </div>
       )}
 
-      {config && (
+      {config && settings && (
         <>
           <h3 className="section-title">当前配置</h3>
           <p className="muted">
@@ -101,7 +102,14 @@ export default function OverviewView() {
   );
 }
 
-function Stat({ value, label, note, warn }) {
+interface StatProps {
+  value: number | string;
+  label: string;
+  note?: string;
+  warn?: boolean;
+}
+
+function Stat({ value, label, note, warn }: StatProps) {
   return (
     <div className="stat">
       <div className="stat-v">{value}</div>
@@ -111,7 +119,8 @@ function Stat({ value, label, note, warn }) {
   );
 }
 
-function Row({ k, v }) {
+/** 配置表的一行。`v` 可能是 null（比如没有全局配置文件），渲染成空格子。 */
+function Row({ k, v }: { k: string; v: string | null }) {
   return (
     <tr>
       <th>{k}</th>

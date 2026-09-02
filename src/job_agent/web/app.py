@@ -118,7 +118,7 @@ def _mount_frontend(app: FastAPI, settings: Settings) -> None:
         return JSONResponse(
             {
                 "message": f"前端未构建（{dist}）。在 frontend/ 下执行 "
-                "`npm install && npm run build`，或直接用 `job web`（会自动构建）。",
+                "`pnpm install && pnpm build`，或直接用 `job web`（会自动构建）。",
                 "api": "/docs",
             }
         )

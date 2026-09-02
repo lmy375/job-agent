@@ -67,9 +67,10 @@ def _ensure_frontend(source_dir: Path, dist_dir: Path) -> None:
     typer.echo("前端尚未构建，正在构建（首次较慢）……")
     try:
         if not (source_dir / "node_modules").is_dir():
-            subprocess.run(["npm", "install"], cwd=source_dir, check=True)
-        subprocess.run(["npm", "run", "build"], cwd=source_dir, check=True)
+            subprocess.run(["pnpm", "install"], cwd=source_dir, check=True)
+        # build 里带 tsc：类型不过就不出产物，别让坏页面悄悄发布
+        subprocess.run(["pnpm", "build"], cwd=source_dir, check=True)
     except FileNotFoundError:
-        echo_warn("没有 npm，跳过前端构建，只提供 API。")
+        echo_warn("没有 pnpm（npm i -g pnpm），跳过前端构建，只提供 API。")
     except subprocess.CalledProcessError as exc:
         echo_error(f"前端构建失败（退出码 {exc.returncode}），只提供 API。")
