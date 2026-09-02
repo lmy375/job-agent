@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query
 
+from job_agent.core.liepin.enums import JobKind
 from job_agent.core.services import ApplyService
 from job_agent.core.storage import JobBundle, JobQuery
 from job_agent.core.storage.repositories import MAX_ROWS
@@ -20,6 +21,10 @@ def list_jobs(
     context: ContextDep,
     keyword: Annotated[str | None, Query(description="按 searchKeyword 精确筛选")] = None,
     q: Annotated[str | None, Query(description="在职位名 / 公司名里模糊搜索")] = None,
+    job_type: Annotated[
+        JobKind | None,
+        Query(description="职位类型：2 = HR 岗位（企业直招）/ 1 = 猎头岗位。省略即两类都看"),
+    ] = None,
     has_detail: Annotated[bool | None, Query(description="是否已抓到 JD")] = None,
     applied: Annotated[bool | None, Query(description="是否已投递")] = None,
     min_salary: Annotated[
@@ -40,6 +45,7 @@ def list_jobs(
         JobQuery(
             keyword=keyword,
             q=q,
+            job_type=job_type,
             has_detail=has_detail,
             applied=applied,
             min_salary=min_salary,

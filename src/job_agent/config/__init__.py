@@ -3,6 +3,9 @@
 
 这一层不依赖 core / cli / web，只依赖 :mod:`job_agent.core.liepin.enums`
 （纯枚举，用来校验搜索参数）。
+
+:mod:`job_agent.config.writer` 反过来把改动写回 profile.toml——
+Web 管理台能直接改搜索关键词与 ``[score]``，但配置仍然只有文件这一处落盘。
 """
 
 from __future__ import annotations
@@ -44,6 +47,7 @@ from job_agent.config.models import (
     StorageConfig,
     WebConfig,
 )
+from job_agent.config.writer import write_keywords, write_score
 
 __all__ = [
     "ENV_CONFIG",
@@ -79,4 +83,6 @@ __all__ = [
     "profiles_root",
     "resolve_profile",
     "templates_dir",
+    "write_keywords",
+    "write_score",
 ]

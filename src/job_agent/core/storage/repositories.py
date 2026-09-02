@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import Select, func, insert, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from job_agent.core.liepin.enums import JobKind
 from job_agent.core.liepin.models import Job
 from job_agent.core.salary import parse_salary
 from job_agent.core.storage.database import Database
@@ -77,6 +78,9 @@ class JobQuery(BaseModel):
 
     keyword: str | None = None
     q: str | None = None
+    #: 只看 HR 直招（``JobKind.HR``）或只看猎头代招（``JobKind.HEADHUNTER``）。
+    #: 猎聘的搜索接口不支持按它过滤，只能采回来之后在本地筛
+    job_type: JobKind | None = None
     has_detail: bool | None = None
     applied: bool | None = None
     min_salary: float | None = None  # 年薪下限（万元），比较的是 salaryHighWan
@@ -265,6 +269,8 @@ class JobRepository:
         if q.q:
             like = f"%{q.q}%"
             stmt = stmt.where(JobRecord.jobName.like(like) | JobRecord.company.like(like))
+        if q.job_type is not None:
+            stmt = stmt.where(JobRecord.jobType == q.job_type.value)
         if q.min_salary is not None:
             stmt = stmt.where(JobRecord.salaryHighWan >= q.min_salary)
         if q.has_detail is not None:

@@ -15,6 +15,14 @@
  * 那些写成 `| null`。
  */
 
+/**
+ * `core/liepin/enums.py` 的 `JobKind`：**谁在招**。
+ *
+ * `"2"` = HR 岗位（企业自己挂的，详情页 /job/），`"1"` = 猎头岗位（详情页 /a/）。
+ * 库里 `jobType` 仍然是裸字符串（老数据可能是空串），所以取标签时要兜底。
+ */
+export type JobKind = "1" | "2";
+
 /** `core/storage/rows.py` 的 `JobRow`：`jobs` 表一行 + LEFT JOIN 上来的分数。 */
 export interface JobRow {
   jobId: number;
@@ -191,6 +199,44 @@ export interface AppSettings {
     accounts: Record<string, { user_token: string | null }>;
     rate_limit_per_min: number;
   };
+  score: ScoreSettings;
+}
+
+/** `[score]` 里的一条信号：命中就加 `weight`，负权重即减分项。 */
+export interface ScoreSignal {
+  name: string;
+  weight: number;
+  pattern: string;
+}
+
+/**
+ * `config/models.py` 的 `ScoreConfig`：打分门槛 + 匹配信号表。
+ *
+ * 既是 `/api/config` 里读到的那一段，也是 `PUT /api/config/score` 的**请求体**
+ * ——后端那边请求体就是 `ScoreConfig` 本身（`ScoreUpdate` 直接继承它），
+ * 所以这里一个类型管两个方向，字段表只有一份。
+ *
+ * 后端是 `extra="forbid"`：多发一个字段会 422，字段名必须一字不差。
+ */
+export interface ScoreSettings {
+  /** 万元/年，税前；null = 不按薪资过滤 */
+  salary_floor_wan: number | null;
+  /** 职位名命中时的权重倍数 */
+  title_multiplier: number;
+  /** 职位名与 JD 都没命中 pattern = 连赛道都不对，扣 penalty 压到末尾 */
+  require: { pattern: string | null; penalty: number };
+  signals: ScoreSignal[];
+}
+
+/** `POST /api/scores/refresh`：一次重新打分的结果（= 命令行的 `job score`）。 */
+export interface ScoreRefreshResponse {
+  /** 打分并落库的条数（全量，未按门槛过滤） */
+  scored: number;
+  /** 按 JD 正文去重后还剩多少条 */
+  unique: number;
+  offTrack: number;
+  fingerprint: string;
+  status: ScoreStatus;
 }
 
 export interface ConfigResponse {

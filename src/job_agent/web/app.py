@@ -30,6 +30,8 @@ DESCRIPTION = """
 
 - `/api/jobs` 职位列表与详情、投递
 - `/api/tasks` 后台采集任务（搜索 / 抓详情）
+- `/api/scores/refresh` 按当前 `[score]` 重新打分（= `job score`）
+- `/api/config` 当前配置；搜索关键词与 `[score]` 可改（写回 profile.toml）
 - `/api/stats` 库内数据概览
 """
 

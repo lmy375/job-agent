@@ -20,6 +20,7 @@ from job_agent.core.storage import (
     JobRepository,
     ScoreRepository,
 )
+from job_agent.errors import ConfigError
 from job_agent.log import get_logger, setup_logging
 
 logger = get_logger(__name__)
@@ -72,6 +73,32 @@ class AppContext(BaseModel):
             applications=ApplicationRepository(db),
             scores=ScoreRepository(db),
         )
+
+    def reload_settings(self) -> Settings:
+        """重新读一遍当前 profile 的两份配置文件并换上。
+
+        Web 管理台改完 ``profile.toml``（关键词、``[score]``）之后调它：
+        生效的永远是**文件里那份**，而不是内存里攒出来的一份改动——
+        「页面上改了但 CLI 跑的是另一套」就是这么来的。
+
+        按 profile **目录**重新定位（而不是名字）：目录是这次运行已经认定的那个，
+        不该因为期间有人改了 ``[profiles].default`` 就换一个库。
+
+        数据库路径变了就拒绝——仓储握的是旧库的连接，换设置不换连接会变成
+        「设置说 A、读写落在 B」。那种情况重启服务即可。
+        """
+        fresh = load_settings(
+            profile=str(self.settings.profile_dir),
+            config_file=self.settings.config_file,
+            root=self.settings.root,
+        )
+        if fresh.storage.database != self.settings.storage.database:
+            raise ConfigError(
+                f"[storage].database 改了（{self.settings.storage.database} → "
+                f"{fresh.storage.database}），热加载不换库连接，请重启服务"
+            )
+        self.settings = fresh
+        return fresh
 
     def client(self) -> LiepinClient:
         """新建一个猎聘客户端（限速窗口是实例级的，别跨线程共用）。"""

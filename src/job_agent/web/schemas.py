@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
-from job_agent.config import ConfigPaths, Settings
+from job_agent.config import ConfigPaths, ScoreConfig, Settings
+from job_agent.core.liepin.enums import JobKind
 from job_agent.core.storage import (
     ApplicationRow,
     JobRow,
@@ -47,7 +47,7 @@ class KeywordsResponse(BaseModel):
 
 
 class ApplyRequest(BaseModel):
-    job_kind: Literal["1", "2"] | None = Field(
+    job_kind: JobKind | None = Field(
         default=None, description="职位类型：1 猎头 / 2 普通。省略时取库里的 jobType。"
     )
 
@@ -108,6 +108,43 @@ class ConfigResponse(BaseModel):
 
     settings: Settings
     paths: ConfigPaths
+
+
+class KeywordsUpdate(BaseModel):
+    """改写当前 profile 的 ``[search].keywords``。
+
+    整份替换而不是增删单个词：**数组顺序就是优先级**（职位记到的
+    ``searchKeyword`` 是最先命中它的那个词），所以顺序本身是要保存的内容，
+    没法用「加一个 / 删一个」表达。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    keywords: list[str] = Field(
+        description="搜索关键词，顺序即优先级；空白与重复项由 SearchConfig 清掉"
+    )
+
+
+class ScoreUpdate(ScoreConfig):
+    """改写当前 profile 的 ``[score]`` 段——**直接就是配置模型本身**。
+
+    刻意不在这里另抄一份字段表：门槛、``title_multiplier``、``require``、
+    信号表的校验（正则能不能编译、有没有踩 TOML 转义的坑）已经写在
+    :class:`~job_agent.config.ScoreConfig` 上，请求体复用它，
+    前端发来的那份就是能落盘的那份。
+    """
+
+
+class ScoreRefreshResponse(BaseModel):
+    """一次重新打分的结果，等价于命令行跑一次 ``job score``。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scored: int = Field(description="打分并落库的条数（全量，未按门槛过滤）")
+    unique: int = Field(description="按 JD 正文去重后还剩多少条")
+    offTrack: int = Field(description="职位名与 JD 都没命中 [score.require] 的条数")
+    fingerprint: str = Field(description="这批分数用的 [score] 指纹")
+    status: ScoreStatus
 
 
 class TaskKind(StrEnum):

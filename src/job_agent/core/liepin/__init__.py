@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from job_agent.core.liepin.client import LiepinClient
 from job_agent.core.liepin.constants import MAX_PAGE, PAGE_SIZE
-from job_agent.core.liepin.enums import EduLevel, SalaryKind, WorkExperience
+from job_agent.core.liepin.enums import EduLevel, JobKind, SalaryKind, WorkExperience
 from job_agent.core.liepin.errors import (
     LiepinAuthError,
     LiepinError,
@@ -19,6 +19,7 @@ __all__ = [
     "ApplyJobResult",
     "EduLevel",
     "Job",
+    "JobKind",
     "LiepinAuthError",
     "LiepinClient",
     "LiepinError",

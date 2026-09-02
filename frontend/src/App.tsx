@@ -3,14 +3,16 @@ import { api, errorMessage } from "./api";
 import JobsView from "./components/JobsView";
 import TasksView from "./components/TasksView";
 import OverviewView from "./components/OverviewView";
+import ConfigView from "./components/ConfigView";
 import type { ConfigPaths, HealthResponse } from "./types";
 
-type TabKey = "jobs" | "tasks" | "overview";
+type TabKey = "jobs" | "tasks" | "overview" | "config";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "jobs", label: "职位" },
   { key: "tasks", label: "采集任务" },
   { key: "overview", label: "数据概览" },
+  { key: "config", label: "配置" },
 ];
 
 export default function App() {
@@ -68,6 +70,7 @@ export default function App() {
       {tab === "jobs" && <JobsView />}
       {tab === "tasks" && <TasksView />}
       {tab === "overview" && <OverviewView />}
+      {tab === "config" && <ConfigView />}
     </div>
   );
 }

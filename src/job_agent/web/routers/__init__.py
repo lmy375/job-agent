@@ -4,12 +4,22 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from job_agent.web.routers import applications, config, health, jobs, keywords, stats, tasks
+from job_agent.web.routers import (
+    applications,
+    config,
+    health,
+    jobs,
+    keywords,
+    scores,
+    stats,
+    tasks,
+)
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(health.router)
 api_router.include_router(jobs.router)
 api_router.include_router(keywords.router)
+api_router.include_router(scores.router)
 api_router.include_router(stats.router)
 api_router.include_router(tasks.router)
 api_router.include_router(applications.router)

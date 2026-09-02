@@ -38,3 +38,18 @@ class SalaryKind(StrEnum):
 
     MONTHLY = "月薪"
     YEARLY = "年薪"
+
+
+class JobKind(StrEnum):
+    """职位类型：搜索响应里的 ``jobType``，投递时原样作为 ``jobKind``。
+
+    区别是**谁在招**：``HR`` 是企业自己挂的岗（详情页链接形如 ``/job/``），
+    ``HEADHUNTER`` 是猎头代招（链接形如 ``/a/``）。同一个岗常被几家猎头
+    重复挂出、还各挂各的标价，所以打分那边要按 JD 正文去重。
+
+    与其他几个枚举不同，这个**不是搜索参数**——接口不支持按它过滤，
+    只能采回来之后在本地筛（``JobQuery.job_type``）。
+    """
+
+    HEADHUNTER = "1"
+    HR = "2"

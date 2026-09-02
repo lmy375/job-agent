@@ -1,8 +1,9 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { api, errorMessage } from "../api";
 import type { JobsQuery } from "../api";
-import { formatTime } from "../format";
+import { formatTime, jobKindLabel } from "../format";
 import type { JobBundle, JobListResponse, JobRow, KeywordCount } from "../types";
+import RescoreButton from "./RescoreButton";
 
 /**
  * 职位列表。
@@ -18,6 +19,7 @@ type SortKey =
   | "scoreRank"
   | "score"
   | "jobName"
+  | "jobType"
   | "company"
   | "location"
   | "salary"
@@ -41,6 +43,7 @@ const COLUMNS: Column[] = [
   { key: "scoreRank", label: "#", get: (j) => j.scoreRank, numeric: true, className: "rank" },
   { key: "score", label: "分", get: (j) => j.score, numeric: true, className: "score" },
   { key: "jobName", label: "职位", get: (j) => j.jobName },
+  { key: "jobType", label: "来源", get: (j) => jobKindLabel(j.jobType) },
   { key: "company", label: "公司", get: (j) => j.company },
   { key: "location", label: "地点", get: (j) => j.location },
   { key: "salary", label: "薪资", get: (j) => j.salaryHighWan, numeric: true },
@@ -56,6 +59,8 @@ const FETCH_ORDER = "score" as const;
 interface Filters {
   keyword: string;
   q: string;
+  /** `""` 两类都看 / `"2"` 只看 HR 岗位 / `"1"` 只看猎头岗位 */
+  job_type: string;
   min_salary: string;
   has_detail: string;
   applied: string;
@@ -73,6 +78,7 @@ export default function JobsView() {
   const [filters, setFilters] = useState<Filters>({
     keyword: "",
     q: "",
+    job_type: "",
     min_salary: "",
     has_detail: "",
     applied: "",
@@ -195,6 +201,11 @@ export default function JobsView() {
           />
           万
         </label>
+        <select value={filters.job_type} onChange={(e) => update({ job_type: e.target.value })}>
+          <option value="">岗位来源：全部</option>
+          <option value="2">只看 HR 岗位</option>
+          <option value="1">只看猎头岗位</option>
+        </select>
         <select value={filters.has_detail} onChange={(e) => update({ has_detail: e.target.value })}>
           <option value="">JD：全部</option>
           <option value="true">已抓到 JD</option>
@@ -236,10 +247,8 @@ export default function JobsView() {
 
       <div className="meta list-meta">
         命中 <b>{data.total}</b> 条{loading ? " · 加载中…" : ""}
-        <span className="muted">
-          {" "}
-          · 点表头排序 · 分数由 <code>job score</code> 落库，改了 [score] 记得重跑
-        </span>
+        <span className="muted"> · 点表头排序 · 分数落库后会过期，改了打分逻辑就重打一次</span>
+        <RescoreButton onDone={load} />
       </div>
 
       <div className="table-wrap">
@@ -287,6 +296,11 @@ export default function JobsView() {
                         ))}
                       </span>
                     )}
+                  </td>
+                  <td>
+                    <span className={job.jobType === "1" ? "kind hunter" : "kind"}>
+                      {jobKindLabel(job.jobType)}
+                    </span>
                   </td>
                   <td>
                     {job.company}

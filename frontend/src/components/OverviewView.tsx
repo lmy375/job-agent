@@ -1,32 +1,46 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { formatTime } from "../format";
-import type { ConfigResponse, OverviewResponse, ScoreStatus } from "../types";
+import type { OverviewResponse, ScoreStatus } from "../types";
+import RescoreButton from "./RescoreButton";
+
+/**
+ * 数据概览：**只报库存，不做分析**。
+ *
+ * 多少职位、抓了多少 JD、投了多少、薪资什么水位。赛道 / 技能分布这类市场分析
+ * 不在这个仓库里（见 CLAUDE.md）。配置在「配置」页，这里不重复显示一遍——
+ * 同一份配置在两个页面各渲染一次，改了一处就会有一处看着是旧的。
+ */
 
 /** 落库分数的新鲜度：过期或有漏打的必须说出来，不能让人把旧分数当成现在的。 */
 function scoreNote(score: ScoreStatus): { text: string; warn: boolean } {
-  if (score.scored === 0) return { text: "还没打过分——跑 job score", warn: true };
-  if (score.stale) return { text: "[score] 改过但没重新打分——跑 job score", warn: true };
+  if (score.scored === 0) return { text: "还没打过分——点上面的「重新打分」", warn: true };
+  if (score.stale)
+    return { text: "打分逻辑改过但没重算——点上面的「重新打分」", warn: true };
   if (score.missing > 0)
-    return { text: `${score.missing} 条有 JD 却没打分——跑 job score`, warn: true };
+    return { text: `${score.missing} 条有 JD 却没打分——点上面的「重新打分」`, warn: true };
   return { text: `最近一次 ${formatTime(score.scoredAt)}`, warn: false };
 }
 
 export default function OverviewView() {
   const [stats, setStats] = useState<OverviewResponse | null>(null);
-  const [config, setConfig] = useState<ConfigResponse | null>(null);
-  // /api/config 返回 { settings, paths }：settings 就是脱敏后的配置树
-  const settings = config?.settings;
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     api.stats().then(setStats).catch((e: unknown) => setError(errorMessage(e)));
-    api.config().then(setConfig).catch((e: unknown) => setError(errorMessage(e)));
   }, []);
+
+  useEffect(load, [load]);
 
   return (
     <>
       {error && <div className="alert error">{error}</div>}
+
+      <h3 className="section-title">
+        库存概览
+        {/* 分数是落库的，会过期——报出过期的地方就该能当场重算 */}
+        <RescoreButton onDone={load} />
+      </h3>
 
       {stats && (
         <div className="stat-grid">
@@ -55,46 +69,18 @@ export default function OverviewView() {
         </div>
       )}
 
-      {config && settings && (
+      {stats && stats.keywords.length > 0 && (
         <>
-          <h3 className="section-title">当前配置</h3>
+          <h3 className="section-title">各搜索关键词的职位数</h3>
           <p className="muted">
-            当前 profile 是 <code>{config.paths.profile}</code>——一个 profile 就是一个人 /
-            一种求职场景，简历、关键词、数据库都在它自己的目录里，和别的 profile 互不可见。
-            配置是文件：跟人无关的改 <code>{config.paths.configFile}</code>，
-            随人而变的改 <code>{config.paths.profileFile}</code>，改完重启服务生效。
-            Web 端只读，避免出现「页面上改了但 CLI 跑的是另一套」。
+            纯库存计数，不带任何赛道 / 分类判断。关键词本身在「配置」页改。
           </p>
-          <div className="table-wrap">
-            <table className="kv">
-              <tbody>
-                <Row k="profile" v={`${config.paths.profile}（${config.paths.profileDir}）`} />
-                <Row k="全局配置" v={config.paths.configFile} />
-                <Row k="profile 配置" v={config.paths.profileFile} />
-                <Row k="数据库" v={config.paths.database} />
-                <Row k="简历" v={config.paths.resume} />
-                <Row k="求职偏好" v={config.paths.preferences} />
-                <Row
-                  k="猎聘账号"
-                  v={`${settings.profile.account}（token ${
-                    settings.liepin.accounts[settings.profile.account]?.user_token
-                      ? "已配置"
-                      : "未配置"
-                  }）`}
-                />
-                <Row k="搜索地点" v={settings.search.address} />
-                <Row
-                  k="薪资门槛"
-                  v={`${settings.search.salary_kind || "—"} ${
-                    settings.search.salary_floor
-                      ? settings.search.salary_floor / 10000 + " 万起"
-                      : "不限"
-                  }`}
-                />
-                <Row k="搜索关键词（顺序即优先级）" v={settings.search.keywords.join("、")} />
-                <Row k="接口限速" v={`${settings.liepin.rate_limit_per_min} 次/分钟`} />
-              </tbody>
-            </table>
+          <div className="chips">
+            {stats.keywords.map((k) => (
+              <span key={k.keyword} className="chip">
+                {k.keyword} <span className="count">{k.count}</span>
+              </span>
+            ))}
           </div>
         </>
       )}
@@ -116,15 +102,5 @@ function Stat({ value, label, note, warn }: StatProps) {
       <div className="stat-l">{label}</div>
       {note && <div className={warn ? "stat-n warn" : "stat-n"}>{note}</div>}
     </div>
-  );
-}
-
-/** 配置表的一行。`v` 可能是 null（比如没有全局配置文件），渲染成空格子。 */
-function Row({ k, v }: { k: string; v: string | null }) {
-  return (
-    <tr>
-      <th>{k}</th>
-      <td className="mono">{v}</td>
-    </tr>
   );
 }
