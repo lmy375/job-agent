@@ -15,13 +15,13 @@ import uuid
 from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
-from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from job_agent.core.services import ProgressEvent
 from job_agent.log import get_logger
+from job_agent.web.schemas import TaskKind, TaskParams, TaskResult, TaskStatus
 
 logger = get_logger(__name__)
 
@@ -31,39 +31,38 @@ MAX_LOGS = 400
 MAX_TASKS = 50
 
 
-class TaskKind(StrEnum):
-    SEARCH = "search"
-    DETAIL = "detail"
-    REPORT = "report"
+class Task(BaseModel):
+    """一个后台任务的可变状态。
 
+    字段名与 :class:`~job_agent.web.schemas.TaskView` 对齐，
+    路由层直接 ``TaskView.model_validate(task)`` 就能出响应。
+    """
 
-class TaskStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+    # deque（日志环形缓冲）与 Event（取消信号）都不是 pydantic 类型
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-
-@dataclass
-class Task:
     id: str
     kind: TaskKind
-    params: dict[str, Any] = field(default_factory=dict)
+    params: TaskParams = Field(default_factory=TaskParams)
     status: TaskStatus = TaskStatus.PENDING
-    created_at: datetime = field(default_factory=datetime.now)
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
+    createdAt: datetime = Field(default_factory=datetime.now)
+    startedAt: datetime | None = None
+    finishedAt: datetime | None = None
     message: str = ""
     current: int | None = None
     total: int | None = None
-    logs: deque[str] = field(default_factory=lambda: deque(maxlen=MAX_LOGS))
-    result: dict[str, Any] | None = None
+    logs: deque[str] = Field(default_factory=lambda: deque(maxlen=MAX_LOGS))
+    result: TaskResult | None = None
     error: str | None = None
-    _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
+
+    #: 取消信号。私有属性而不是字段：它是线程原语，不该进 repr、也不该被序列化
+    _cancel: threading.Event = PrivateAttr(default_factory=threading.Event)
+
+    def request_cancel(self) -> None:
+        self._cancel.set()
 
     @property
-    def cancel_requested(self) -> bool:
+    def cancelRequested(self) -> bool:  # noqa: N802 - 对齐响应字段名
         return self._cancel.is_set()
 
     @property
@@ -75,27 +74,6 @@ class Task:
     @property
     def done(self) -> bool:
         return self.status in (TaskStatus.SUCCEEDED, TaskStatus.FAILED, TaskStatus.CANCELLED)
-
-    def as_dict(self, with_logs: bool = True) -> dict[str, Any]:
-        data: dict[str, Any] = {
-            "id": self.id,
-            "kind": self.kind.value,
-            "status": self.status.value,
-            "params": self.params,
-            "message": self.message,
-            "current": self.current,
-            "total": self.total,
-            "percent": self.percent,
-            "createdAt": _iso(self.created_at),
-            "startedAt": _iso(self.started_at),
-            "finishedAt": _iso(self.finished_at),
-            "cancelRequested": self.cancel_requested,
-            "result": self.result,
-            "error": self.error,
-        }
-        if with_logs:
-            data["logs"] = list(self.logs)
-        return data
 
 
 class TaskManager:
@@ -110,7 +88,7 @@ class TaskManager:
     # ------------------------------------------------------------------ 提交
 
     def submit(
-        self, kind: TaskKind, runner: Callable[[Task], dict[str, Any]], **params: Any
+        self, kind: TaskKind, runner: Callable[[Task], TaskResult], params: TaskParams
     ) -> Task:
         """排入一个任务。``runner`` 在后台线程里执行，返回值作为 ``result``。"""
         task = Task(id=uuid.uuid4().hex[:12], kind=kind, params=params)
@@ -118,23 +96,23 @@ class TaskManager:
             self._tasks[task.id] = task
             self._order.append(task.id)
             self._evict_locked()
-        logger.info("任务入队 %s（%s）params=%s", task.id, kind.value, params)
+        logger.info("任务入队 %s（%s）params=%s", task.id, kind.value, params.model_dump())
         future: Future[None] = self._executor.submit(self._run, task, runner)
         future.add_done_callback(lambda f: self._log_future_error(task, f))
         return task
 
-    def _run(self, task: Task, runner: Callable[[Task], dict[str, Any]]) -> None:
-        if task.cancel_requested:
+    def _run(self, task: Task, runner: Callable[[Task], TaskResult]) -> None:
+        if task.cancelRequested:
             task.status = TaskStatus.CANCELLED
-            task.finished_at = datetime.now()
+            task.finishedAt = datetime.now()
             task.message = "任务在开始前被取消"
             return
         task.status = TaskStatus.RUNNING
-        task.started_at = datetime.now()
+        task.startedAt = datetime.now()
         try:
             task.result = runner(task)
             task.status = (
-                TaskStatus.CANCELLED if task.cancel_requested else TaskStatus.SUCCEEDED
+                TaskStatus.CANCELLED if task.cancelRequested else TaskStatus.SUCCEEDED
             )
         except Exception as exc:
             logger.exception("任务 %s 失败", task.id)
@@ -142,7 +120,7 @@ class TaskManager:
             task.error = f"{type(exc).__name__}: {exc}"
             task.logs.append(f"{datetime.now():%H:%M:%S} [error] {task.error}")
         finally:
-            task.finished_at = datetime.now()
+            task.finishedAt = datetime.now()
             if task.error:
                 task.message = task.error
 
@@ -173,7 +151,7 @@ class TaskManager:
         task = self.get(task_id)
         if task is None or task.done:
             return task
-        task._cancel.set()
+        task.request_cancel()
         task.message = "已请求取消，等当前条目结束后停止"
         logger.info("任务 %s 请求取消", task_id)
         return task
@@ -203,6 +181,3 @@ class TaskManager:
                 return
             self._tasks.pop(oldest, None)
 
-
-def _iso(value: datetime | None) -> str | None:
-    return value.isoformat(sep=" ", timespec="seconds") if value else None

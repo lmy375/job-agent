@@ -19,6 +19,13 @@
 # 会静默变成 <退格>agent<退格>：正则编译得过、一条也匹配不上、排名看着正常但全错。
 # （真写错了 job config validate 会拦下来，但不如一开始就用单引号。）
 #
+# 英文词的单词边界必须裹一层 (?a:...) —— 这是第二个同样安静的坑。
+# Python 的 \b 是「\w 与非 \w 的交界」，而中文字符**算 \w**，
+# 于是 '\bai\b' 匹配不上「AI应用」、'\bagent\b' 匹配不上「Agent开发」「多Agent协作」：
+# 中文 JD 里英文缩写紧贴汉字是常态，等于这条信号常年不命中。
+# (?a:...) 让括号内的 \b / \w 只按 ASCII 算，汉字就重新成了边界。
+# 只裹英文缩写那一段，别整条裹——\s 保持 Unicode 语义才能吃全角空格。
+#
 # 打分怎么算：
 #   1. 每条 [[signals]] 的正则在「职位名 + JD 正文」里搜一次，命中就加 weight
 #   2. 命中位置在**职位名**里时，weight × options.title_multiplier（职位名更能代表岗位本质）
@@ -39,7 +46,7 @@ title_multiplier = 2.0
 #
 # 为什么需要这道闸：光靠 [[signals]] 里的负信号，永远穷举不完所有不想要的方向。
 # 正向要求「必须提到我的赛道」比反向排除「不能是 XX 岗」可靠得多。
-pattern = '\bagent\b|智能体|大模型|\bllm\b|\bai\b|人工智能|生成式|agentic'
+pattern = '(?a:\bagent\b|\bllm\b|\bai\b)|智能体|大模型|人工智能|生成式|agentic'
 penalty = -20.0
 
 # ============================================================ 正信号
@@ -50,12 +57,12 @@ penalty = -20.0
 [[signals]]
 name = "AI Agent / 智能体"
 weight = 10
-pattern = '\bagent\b|智能体|agentic|多智能体'
+pattern = '(?a:\bagent\b)|智能体|agentic|多智能体'
 
 [[signals]]
 name = "MCP 协议"
 weight = 9
-pattern = '\bmcp\b|model\s+context\s+protocol'
+pattern = '(?a:\bmcp\b)|model\s+context\s+protocol'
 
 [[signals]]
 name = "大模型应用落地"
@@ -80,7 +87,7 @@ pattern = 'tech\s*lead|技术负责人|带(领)?团队|团队管理|研发负责
 [[signals]]
 name = "RAG / 知识库"
 weight = 6
-pattern = '\brag\b|检索增强|知识库|向量(检索|数据库)|语义检索'
+pattern = '(?a:\brag\b)|检索增强|知识库|向量(检索|数据库)|语义检索'
 
 [[signals]]
 name = "上下文工程 / 提示工程"
@@ -95,12 +102,12 @@ pattern = 'function\s*call|tool\s*(call|use)|工具调用|插件体系'
 [[signals]]
 name = "评测 / 可观测"
 weight = 5
-pattern = 'langfuse|langsmith|可观测|评测体系|\beval\b|评估体系'
+pattern = 'langfuse|langsmith|可观测|评测体系|(?a:\beval\b)|评估体系'
 
 [[signals]]
 name = "Python"
 weight = 5
-pattern = '\bpython\b'
+pattern = '(?a:\bpython\b)'
 
 [[signals]]
 name = "从 0 到 1"
@@ -110,22 +117,22 @@ pattern = '从\s*0\s*到\s*1|0-1|从零(搭建|开始)|搭建体系'
 [[signals]]
 name = "FastAPI"
 weight = 4
-pattern = '\bfastapi\b'
+pattern = '(?a:\bfastapi\b)'
 
 [[signals]]
 name = "Electron / 桌面端"
 weight = 4
-pattern = '\belectron\b|桌面客户端|桌面端'
+pattern = '(?a:\belectron\b)|桌面客户端|桌面端'
 
 [[signals]]
 name = "Agent 框架"
 weight = 3
-pattern = '\bagno\b|langchain|langgraph|llamaindex|dify|autogen|crewai|openai\s*agents'
+pattern = '(?a:\bagno\b)|langchain|langgraph|llamaindex|dify|autogen|crewai|openai\s*agents'
 
 [[signals]]
 name = "前端 / 全栈"
 weight = 3
-pattern = 'typescript|\breact\b|前端|全栈'
+pattern = 'typescript|(?a:\breact\b)|前端|全栈'
 
 [[signals]]
 name = "移动端 / 跨端"
@@ -148,7 +155,7 @@ pattern = '区块链|web3|加密货币|钱包|链上'
 [[signals]]
 name = "非研发职能"
 weight = -16
-pattern = '\bceo\b|\bcfo\b|\bcmo\b|\bcho\b|hrvp|首席(执行|财务|营销|运营)|总裁|总经理|事业部|市场(经理|营销|总监)|销售|解决方案(总监|架构)|售前|咨询顾问|对外事务|战略变革|投融资|人力资源|财务|法务|品牌'
+pattern = '(?a:\bceo\b|\bcfo\b|\bcmo\b|\bcho\b)|hrvp|首席(执行|财务|营销|运营)|总裁|总经理|事业部|市场(经理|营销|总监)|销售|解决方案(总监|架构)|售前|咨询顾问|对外事务|战略变革|投融资|人力资源|财务|法务|品牌'
 
 [[signals]]
 name = "商业化 / BD / 增长"
@@ -158,17 +165,17 @@ pattern = '商业化|业务拓展|客户成功|渠道(经理|总监|运营)|增�
 [[signals]]
 name = "硬件 / 具身 / 自驾"
 weight = -14
-pattern = '芯片|\beda\b|流片|具身|机器人本体|自动驾驶|智能驾驶|\bvla\b|感知算法|激光雷达|车规|整车|硬件研发|嵌入式|穿戴|ar眼镜'
+pattern = '芯片|(?a:\beda\b|\bvla\b)|流片|具身|机器人本体|自动驾驶|智能驾驶|感知算法|激光雷达|车规|整车|硬件研发|嵌入式|穿戴|ar眼镜'
 
 [[signals]]
 name = "纯安全岗"
 weight = -14
-pattern = '渗透测试|等级保护|安全合规|甲方安全|安全运营|\bsoc\b|态势感知|安全审计岗|漏洞挖掘|逆向分析|红蓝对抗|数据安全治理|安全产品经理'
+pattern = '渗透测试|等级保护|安全合规|甲方安全|安全运营|(?a:\bsoc\b)|态势感知|安全审计岗|漏洞挖掘|逆向分析|红蓝对抗|数据安全治理|安全产品经理'
 
 [[signals]]
 name = "算法训练岗"
 weight = -12
-pattern = '预训练|后训练|强化学习|\brlhf\b|模型训练|训练框架|分布式训练|算子|\bcuda\b|推理(加速|优化)|量化压缩|蒸馏|megatron|deepspeed|推荐算法|搜索算法|广告算法|排序模型|召回'
+pattern = '预训练|后训练|强化学习|模型训练|训练框架|分布式训练|算子|(?a:\brlhf\b|\bcuda\b)|推理(加速|优化)|量化压缩|蒸馏|megatron|deepspeed|推荐算法|搜索算法|广告算法|排序模型|召回'
 
 [[signals]]
 name = "内容 / 数字人"
@@ -183,9 +190,9 @@ pattern = '产品经理|产品总监|产品负责人'
 [[signals]]
 name = "数据工程 / 数仓"
 weight = -8
-pattern = '数据仓库|数仓|\betl\b|flink|spark\s*streaming|iceberg|paimon|clickhouse|doris|starrocks|olap|特征平台|feature\s*store'
+pattern = '数据仓库|数仓|(?a:\betl\b)|flink|spark\s*streaming|iceberg|paimon|clickhouse|doris|starrocks|olap|特征平台|feature\s*store'
 
 [[signals]]
 name = "传统运维"
 weight = -6
-pattern = '运维|\bsre\b|\bdba\b|中间件运维|集群运维|报表开发'
+pattern = '运维|(?a:\bsre\b|\bdba\b)|中间件运维|集群运维|报表开发'

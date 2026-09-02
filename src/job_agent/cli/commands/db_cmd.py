@@ -6,7 +6,6 @@ import typer
 from sqlalchemy import text
 
 from job_agent.cli.state import CliState, echo_ok
-from job_agent.core.storage.migrations import run_migrations
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 
@@ -29,19 +28,6 @@ def info(ctx: typer.Context) -> None:
         for table in tables:
             count = session.execute(text(f'SELECT COUNT(*) FROM "{table}"')).scalar()
             typer.echo(f"  {table:<16}{count:>8}")
-
-
-@app.command("migrate", help="补齐缺失的列并回填派生字段（幂等）。")
-def migrate(ctx: typer.Context) -> None:
-    state: CliState = ctx.obj
-    context = state.context()
-    done = run_migrations(context.db.engine)
-    if not done:
-        echo_ok("数据库已是最新，无需迁移")
-        return
-    for item in done:
-        typer.echo(f"  · {item}")
-    echo_ok(f"完成 {len(done)} 项迁移")
 
 
 @app.command("vacuum", help="回收空间（VACUUM）。")

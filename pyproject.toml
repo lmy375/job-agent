@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.7,<3.0",
+    # 配置分层（环境变量 > config/config.toml）全部交给它，不自写解析逻辑
+    "pydantic-settings>=2.6,<3.0",
     "requests>=2.32,<3.0",
     "sqlalchemy>=2.0,<3.0",
     "fastapi>=0.110",
@@ -24,10 +26,24 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
 ]
+# LangGraph 独立执行路线（src/job_agent/agent/）。不装它，job / job web 完全不受影响
+agent = [
+    "langgraph>=1.0,<2.0",
+    "langgraph-checkpoint-sqlite>=2.0",
+    # 模型客户端只需要两个：Anthropic 原生协议，以及 OpenAI 协议
+    # （ChatGPT、DeepSeek、Kimi、通义、GLM、本地 vLLM 都兼容后者，填 base_url 即可）
+    "langchain-anthropic>=1.0,<2.0",
+    "langchain-openai>=1.0,<2.0",
+    # 运行追踪（可选启用：config.toml 的 [agent.langsmith] 填了 api_key 才生效）。
+    # langsmith 本来就是 langchain-core 的依赖，这里显式钉版本；
+    # 它靠环境变量开关、不需要挂 callback handler，所以也不用装 langchain 本体
+    "langsmith>=0.4,<1.0",
+]
 
 [project.scripts]
 job = "job_agent.cli:main"
-job-agent = "job_agent.cli:main"
+# LangGraph 路线的独立入口，与 job（typer CLI）互不依赖
+job-agent = "job_agent.agent.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

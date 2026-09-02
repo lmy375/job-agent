@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
+import { formatTime } from "../format.js";
 
 const POLL_MS = 2000;
 
@@ -42,19 +43,20 @@ export default function TasksView() {
 
   const submit = async (kind) => {
     setError("");
-    const payload = { kind };
+    const params = {};
     if (kind === "search") {
       const keywords = form.keywords
         .split(/[,，\s]+/)
         .map((s) => s.trim())
         .filter(Boolean);
-      if (keywords.length) payload.keywords = keywords;
-      if (form.pages) payload.pages = Number(form.pages);
+      if (keywords.length) params.keywords = keywords;
+      if (form.pages) params.pages = Number(form.pages);
     }
     if (kind === "detail") {
-      if (form.limit) payload.limit = Number(form.limit);
-      payload.retry_failed = form.retryFailed;
+      if (form.limit) params.limit = Number(form.limit);
+      params.retry_failed = form.retryFailed;
     }
+    const payload = { kind, params };
     try {
       const data = await api.createTask(payload);
       setSelected(data.task.id);
@@ -137,7 +139,7 @@ export default function TasksView() {
         <section className="panel">
           <h3>生成报告</h3>
           <p className="muted">
-            按赛道统计已抓到的 JD，套用 config/insights 里的文字素材，生成自包含 HTML 报告。
+            按赛道统计已抓到的 JD，套用当前 profile 的 insights/ 文字素材，生成自包含 HTML 报告。
           </p>
           <button className="btn" onClick={() => submit("report")}>
             生成报告
@@ -187,7 +189,7 @@ export default function TasksView() {
                   )}
                 </td>
                 <td className="msg">{task.message || task.error || ""}</td>
-                <td className="sub">{task.createdAt}</td>
+                <td className="sub">{formatTime(task.createdAt)}</td>
                 <td className="actions">
                   <button className="btn small ghost" onClick={() => setSelected(task.id)}>
                     日志

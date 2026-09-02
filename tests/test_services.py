@@ -59,7 +59,7 @@ def test_search_writes_jobs_and_stops_on_page_limit(settings, context):
     assert summary.total_new == 2
     assert not summary.aborted
     assert context.jobs.count() == 2
-    assert context.jobs.get(1)["searchKeyword"] == "AI Agent"
+    assert context.jobs.get(1).searchKeyword == "AI Agent"
 
 
 def test_search_stops_paging_on_empty_page(settings, context):
@@ -184,7 +184,7 @@ def test_detail_fetch_and_persist(settings, context):
 
     assert summary.total == 2
     assert summary.statuses["ok"] == 2
-    assert "Agent 平台建设" in context.details.get(1)["responsibilities"]
+    assert "Agent 平台建设" in context.details.get(1).responsibilities
 
 
 def test_detail_marks_no_jd_and_http_error(settings, context):

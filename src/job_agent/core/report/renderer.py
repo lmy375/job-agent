@@ -1,6 +1,6 @@
 """把统计结果渲染成一份自包含的 HTML 报告。
 
-输入是 :func:`job_agent.core.analysis.analyze` 的输出 + ``config/insights`` 里的文字素材，
+输入是 :func:`job_agent.core.analysis.analyze` 的输出 + profile 的 ``insights/`` 里的文字素材，
 输出是一个不依赖任何外部资源的 HTML 文件（离线可看、可直接发人）。
 """
 
@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from job_agent.config import Settings
+from job_agent.core.analysis import Analysis, AnalysisRow, SkillStat, TrackStats
 from job_agent.core.report.insights import (
     LEVELS,
     MATCH_TABLE_PLACEHOLDER,
@@ -42,22 +43,23 @@ def e(s: Any) -> str:
 
 
 def bar_rows(
-    items: list[tuple[str, int, float]], top: int = 14, color_var: str = "--series-1"
+    items: list[SkillStat], top: int = 14, color_var: str = "--series-1"
 ) -> str:
     """横向条形：单序列，统一用一个颜色（分类数据不做值映射着色）。"""
-    items = [i for i in items if i[1] > 0][:top]
+    items = [i for i in items if i.count > 0][:top]
     if not items:
         return '<p class="empty">该赛道样本中未出现可统计的关键词。</p>'
-    top_pct = max(p for _, _, p in items) or 1
+    top_pct = max(i.pct for i in items) or 1
     out = ['<div class="bars">']
-    for name, n, pct in items:
-        w = pct / top_pct * 100
+    for item in items:
+        w = item.pct / top_pct * 100
         out.append(
-            f'<div class="bar-row" title="{e(name)}：{n} 条 JD 提及（{pct:.0f}%）">'
-            f'<div class="bar-label">{e(name)}</div>'
+            f'<div class="bar-row" title="{e(item.name)}：{item.count} 条 JD 提及'
+            f'（{item.pct:.0f}%）">'
+            f'<div class="bar-label">{e(item.name)}</div>'
             f'<div class="bar-track"><div class="bar-fill" '
             f'style="width:{w:.1f}%;background:var({color_var})"></div></div>'
-            f'<div class="bar-val">{pct:.0f}<span class="pct">%</span></div>'
+            f'<div class="bar-val">{item.pct:.0f}<span class="pct">%</span></div>'
             f"</div>"
         )
     out.append("</div>")
@@ -65,17 +67,20 @@ def bar_rows(
 
 
 def count_bars(items: list[tuple[str, int]], top: int = 12) -> str:
+    """把 ``(名称, 条数)`` 的长尾分布换算成占比后画成条形。"""
     total = sum(n for _, n in items) or 1
-    return bar_rows([(k, n, n / total * 100) for k, n in items[:top]], top=top)
+    return bar_rows(
+        [SkillStat(name=k, count=n, pct=n / total * 100) for k, n in items[:top]], top=top
+    )
 
 
-def skill_table(skills: dict[str, list[tuple[str, int, float]]], count: int) -> str:
+def skill_table(skills: dict[str, list[SkillStat]], count: int) -> str:
     """技能出现率的表格视图（每张图都要有可读的表格孪生体）。"""
     rows = []
     for group, items in skills.items():
-        for name, n, pct in items:
-            if n:
-                rows.append((group, name, n, pct))
+        for item in items:
+            if item.count:
+                rows.append((group, item.name, item.count, item.pct))
     rows.sort(key=lambda r: -r[3])
     body = "".join(
         f"<tr><td>{e(g)}</td><td>{e(n)}</td><td class='num'>{c}</td>"
@@ -91,12 +96,12 @@ def skill_table(skills: dict[str, list[tuple[str, int, float]]], count: int) -> 
     )
 
 
-def job_table(jobs: list[dict[str, Any]], top: int = 25) -> str:
+def job_table(jobs: list[AnalysisRow], top: int = 25) -> str:
     body = "".join(
-        f"<tr><td><a href='{e(j['url'])}' target='_blank' rel='noopener'>"
-        f"{e(j['jobName'])}</a></td>"
-        f"<td>{e(j['company'])}</td><td>{e(j['salary'])}</td>"
-        f"<td>{e(j['workYears'])}</td><td>{e(j['role'])}</td></tr>"
+        f"<tr><td><a href='{e(j.url)}' target='_blank' rel='noopener'>"
+        f"{e(j.jobName)}</a></td>"
+        f"<td>{e(j.company)}</td><td>{e(j.salary)}</td>"
+        f"<td>{e(j.workYears)}</td><td>{e(j.role)}</td></tr>"
         for j in jobs[:top]
     )
     return (
@@ -114,22 +119,27 @@ def stat(value: str, label: str, note: str = "") -> str:
     )
 
 
-def grouped_track_bars(data: dict[str, Any], group: str, top: int = 10) -> str:
+def grouped_track_bars(data: Analysis, group: str, top: int = 10) -> str:
     """同一技能分类在各赛道的命中率并排对比，用于「跨赛道差异」。
 
     只对比用户关心的三条赛道：分类色板的前 3 个槽位在明暗两种模式下都通过了
     all-pairs 色觉分离校验，再多一个槽位（黄）会和橙撞车。
     """
-    tracks = [t for t in CROSS_TRACKS if t in data["tracks"]]
+    tracks = [t for t in CROSS_TRACKS if t in data.tracks]
     names: list[str] = []
     for t in tracks:
-        for name, n, _ in data["tracks"][t]["skills"].get(group, []):
-            if n and name not in names:
-                names.append(name)
+        for item in data.tracks[t].skills.get(group, []):
+            if item.count and item.name not in names:
+                names.append(item.name)
     # 按「在各赛道的最大命中率」排序，取前 top 个
     def peak(name: str) -> float:
         return max(
-            (p for t in tracks for nm, _, p in data["tracks"][t]["skills"].get(group, []) if nm == name),
+            (
+                item.pct
+                for t in tracks
+                for item in data.tracks[t].skills.get(group, [])
+                if item.name == name
+            ),
             default=0.0,
         )
 
@@ -140,7 +150,7 @@ def grouped_track_bars(data: dict[str, Any], group: str, top: int = 10) -> str:
     scale = max((peak(n) for n in names), default=0.0) or 1.0
     legend = "".join(
         f"<span class='lg'><i style='background:var(--series-{i + 1})'></i>{e(t)}"
-        f"<span class='lg-n'>n={data['tracks'][t]['count']}</span></span>"
+        f"<span class='lg-n'>n={data.tracks[t].count}</span></span>"
         for i, t in enumerate(tracks)
     )
     rows = []
@@ -148,7 +158,12 @@ def grouped_track_bars(data: dict[str, Any], group: str, top: int = 10) -> str:
         cells = []
         for i, t in enumerate(tracks):
             pct = next(
-                (p for nm, _, p in data["tracks"][t]["skills"].get(group, []) if nm == name), 0.0
+                (
+                    item.pct
+                    for item in data.tracks[t].skills.get(group, [])
+                    if item.name == name
+                ),
+                0.0,
             )
             cells.append(
                 f"<div class='mini-row' title='{e(t)} · {e(name)}：{pct:.0f}%'>"
@@ -166,20 +181,20 @@ def grouped_track_bars(data: dict[str, Any], group: str, top: int = 10) -> str:
 SMALL_SAMPLE = 20  # 样本少于这个数就不画百分比图，只列原始职位
 
 
-def small_sample_section(track: str, info: dict[str, Any], insight: str) -> str:
+def small_sample_section(track: str, info: TrackStats, insight: str) -> str:
     """样本太小时的呈现：不画百分比条形图（7 条里的 1 条 = 14%，图会骗人），
     直接把职位逐条列出来，让读者自己判断。"""
     body = "".join(
-        f"<tr><td><a href='{e(j['url'])}' target='_blank' rel='noopener'>{e(j['jobName'])}</a></td>"
-        f"<td>{e(j['company'])}</td><td>{e(j['salary'])}</td>"
-        f"<td>{e(j['workYears'])}</td><td>{e(j['role'])}</td></tr>"
-        for j in info["jobs"]
+        f"<tr><td><a href='{e(j.url)}' target='_blank' rel='noopener'>{e(j.jobName)}</a></td>"
+        f"<td>{e(j.company)}</td><td>{e(j.salary)}</td>"
+        f"<td>{e(j.workYears)}</td><td>{e(j.role)}</td></tr>"
+        for j in info.jobs
     )
     return f"""
 <section class="track" id="track-{e(track)}">
   <h2>{e(track)} 赛道<span class="sub">{e(TRACK_DESC.get(track, ''))}</span></h2>
   <div class="insight warn">
-    <p><strong>样本仅 {info["count"]} 条，不足以做占比统计。</strong>
+    <p><strong>样本仅 {info.count} 条，不足以做占比统计。</strong>
     这本身就是结论：在页首那组筛选条件下，{e(track)} 赛道的技术岗几乎不存在。
     占比图在这种样本量下会骗人（7 条里的 1 条就是 14%），
     所以下面直接列出全部原始职位。</p>
@@ -191,38 +206,36 @@ def small_sample_section(track: str, info: dict[str, Any], insight: str) -> str:
 """
 
 
-def track_section(track: str, info: dict[str, Any], insight: str) -> str:
+def track_section(track: str, info: TrackStats, insight: str) -> str:
     sal = ""
-    if info["salaryMedianHigh"]:
-        sal = f"{info['salaryMedianLow']:.0f}–{info['salaryMedianHigh']:.0f} 万"
+    if info.salaryMedianHigh and info.salaryMedianLow:
+        sal = f"{info.salaryMedianLow:.0f}–{info.salaryMedianHigh:.0f} 万"
     # 「最主要角色」跳过「AI 其他」这类兜底桶，展示真正有信息量的角色
-    named = [(r, n) for r, n in info["roles"] if "其他" not in r and "未分类" not in r]
-    top_role = named[0] if named else (info["roles"][0] if info["roles"] else ("—", 0))
+    named = [(r, n) for r, n in info.roles if "其他" not in r and "未分类" not in r]
+    top_role = named[0] if named else (info.roles[0] if info.roles else ("—", 0))
     stats = (
-        stat(str(info["count"]), "有效 JD 数")
+        stat(str(info.count), "有效 JD 数")
         + stat(
             sal or "—",
             "年薪中位区间",
-            f"90 分位 {info['salaryP90High']:.0f} 万" if info["salaryP90High"] else "",
+            f"90 分位 {info.salaryP90High:.0f} 万" if info.salaryP90High else "",
         )
         + stat(
-            f"{info['meets100'] / info['salaryParsed'] * 100:.0f}%"
-            if info["salaryParsed"]
-            else "—",
+            f"{info.meets100 / info.salaryParsed * 100:.0f}%" if info.salaryParsed else "—",
             "薪资上限真正 ≥100 万",
-            f"{info['meets100']}/{info['salaryParsed']} 条",
+            f"{info.meets100}/{info.salaryParsed} 条",
         )
         + stat(top_role[0], "最主要角色", f"{top_role[1]} 条")
         + stat(
-            f"{info['education'][0][0]}" if info["education"] else "—",
+            f"{info.education[0][0]}" if info.education else "—",
             "最常见学历门槛",
-            f"{info['education'][0][1]} 条" if info["education"] else "",
+            f"{info.education[0][1]} 条" if info.education else "",
         )
     )
 
     skill_blocks = []
-    for group, items in info["skills"].items():
-        if not any(n for _, n, _ in items):
+    for group, items in info.skills.items():
+        if not any(item.count for item in items):
             continue
         skill_blocks.append(
             f"<div class='card'><h4>{e(group)}</h4>{bar_rows(items)}</div>"
@@ -234,15 +247,15 @@ def track_section(track: str, info: dict[str, Any], insight: str) -> str:
   <div class="stats">{stats}</div>
   <div class="insight">{insight}</div>
   <div class="card-grid g2">
-    <div class="card"><h4>角色构成</h4>{count_bars(info["roles"])}</div>
-    <div class="card"><h4>经验要求</h4>{count_bars(info["workYears"])}</div>
-    <div class="card"><h4>所属行业</h4>{count_bars(info["industries"], top=8)}</div>
-    <div class="card"><h4>公司规模</h4>{count_bars(info["companySize"], top=8)}</div>
+    <div class="card"><h4>角色构成</h4>{count_bars(info.roles)}</div>
+    <div class="card"><h4>经验要求</h4>{count_bars(info.workYears)}</div>
+    <div class="card"><h4>所属行业</h4>{count_bars(info.industries, top=8)}</div>
+    <div class="card"><h4>公司规模</h4>{count_bars(info.companySize, top=8)}</div>
   </div>
   <h3>技能与能力要求（各技能词在该赛道 JD 中的出现率）</h3>
   <div class="card-grid">{"".join(skill_blocks)}</div>
-  {skill_table(info["skills"], info["count"])}
-  {job_table(info["jobs"])}
+  {skill_table(info.skills, info.count)}
+  {job_table(info.jobs)}
 </section>
 """
 
@@ -250,7 +263,7 @@ def track_section(track: str, info: dict[str, Any], insight: str) -> str:
 def match_table(rows: list[MatchRow]) -> str:
     """能力项 × 市场需求 × 简历现状的矩阵表格。"""
     if not rows:
-        return "<p class='empty'>未配置匹配矩阵（config/insights/match-matrix.toml）。</p>"
+        return "<p class='empty'>未配置匹配矩阵（insights/match-matrix.toml）。</p>"
     body = []
     for row in rows:
         label, css_class = LEVELS[row.level]
@@ -275,17 +288,17 @@ def _salary_label(settings: Settings) -> str:
     return f"{kind} {floor / 10000:.0f} 万+"
 
 
-def render(data: dict[str, Any], insights: Insights, settings: Settings) -> str:
+def render(data: Analysis, insights: Insights, settings: Settings) -> str:
     """渲染完整 HTML。``data`` 来自 :func:`job_agent.core.analysis.analyze`。"""
-    tracks = [t for t in TRACK_ORDER if t in data["tracks"]]
-    total = data["total"]
-    counts = data["trackCounts"]
+    tracks = [t for t in TRACK_ORDER if t in data.tracks]
+    total = data.total
+    counts = data.trackCounts
     address = settings.search.address or "全国"
     salary_label = _salary_label(settings)
     who = settings.profile.name or "求职者"
 
     # 全样本里薪资上限真正达标的比例。写死过一次（60%），样本一变就过期，改成实算。
-    caps = [row["salaryHigh"] for row in data["rows"] if row["salaryHigh"]]
+    caps = [row.salaryHigh for row in data.rows if row.salaryHigh]
     threshold = (settings.search.salary_floor or 0) / 10000
     meets_pct = (
         round(sum(1 for cap in caps if cap >= threshold) / len(caps) * 100)
@@ -300,8 +313,8 @@ def render(data: dict[str, Any], insights: Insights, settings: Settings) -> str:
         toc += "<a href='#advice'>给我的建议</a>"
 
     sections = "".join(
-        (small_sample_section if data["tracks"][t]["count"] < SMALL_SAMPLE else track_section)(
-            t, data["tracks"][t], insights.for_track(t)
+        (small_sample_section if data.tracks[t].count < SMALL_SAMPLE else track_section)(
+            t, data.tracks[t], insights.for_track(t)
         )
         for t in tracks
     )
@@ -377,7 +390,7 @@ def render(data: dict[str, Any], insights: Insights, settings: Settings) -> str:
 
 
 def build(
-    data: dict[str, Any],
+    data: Analysis,
     settings: Settings,
     output: Path | None = None,
     insights: Insights | None = None,

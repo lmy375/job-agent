@@ -11,6 +11,8 @@ import json
 import re
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 _LD_JSON_RE = re.compile(r'<script type="application/ld\+json">(.*?)</script>', re.S)
 _JOB_INTRO_RE = re.compile(r'data-selector="job-intro-content"[^>]*>(.*?)</dd>', re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -47,23 +49,30 @@ RESP_HEADINGS = (
     "Responsibilities",
 )
 
-#: 解析结果的字段集合（不含 status）
-FIELDS = (
-    "title",
-    "description",
-    "responsibilities",
-    "requirements",
-    "industry",
-    "experienceRequirements",
-    "educationRequirements",
-    "employmentType",
-    "datePosted",
-    "companyName",
-    "companyUrl",
-    "streetAddress",
-)
 
-EMPTY_DETAIL: dict[str, str] = dict.fromkeys(FIELDS, "")
+class ParsedDetail(BaseModel):
+    """详情页解析出的 JD 字段。
+
+    字段名沿用猎聘 JobPosting 的 camelCase，与 ``job_details`` 表一一对应
+    （表里另有 ``jobId`` 与 ``status``，那是落库时才有的东西，见
+    :class:`job_agent.core.storage.rows.JobDetailRow`）。
+    全字段有默认值：抓取失败时用一个空实例配上 status 就能落库。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = ""
+    description: str = ""
+    responsibilities: str = ""
+    requirements: str = ""
+    industry: str = ""
+    experienceRequirements: str = ""
+    educationRequirements: str = ""
+    employmentType: str = ""
+    datePosted: str = ""
+    companyName: str = ""
+    companyUrl: str = ""
+    streetAddress: str = ""
 
 
 def split_jd(text: str) -> tuple[str, str]:
@@ -84,7 +93,7 @@ def split_jd(text: str) -> tuple[str, str]:
     return head, tail
 
 
-def parse_detail(html: str) -> dict[str, str] | None:
+def parse_detail(html: str) -> ParsedDetail | None:
     """从详情页 HTML 提取字段；页面既无 JobPosting 也无兜底节点时返回 ``None``。"""
     posting: dict[str, Any] | None = None
     for raw in _LD_JSON_RE.findall(html):
@@ -107,17 +116,17 @@ def parse_detail(html: str) -> dict[str, str] | None:
     org = posting.get("hiringOrganization") or {}
     place = (posting.get("jobLocation") or {}).get("address") or {}
     responsibilities, requirements = split_jd(description)
-    return {
-        "title": posting.get("title") or "",
-        "description": description,
-        "responsibilities": responsibilities,
-        "requirements": requirements,
-        "industry": posting.get("industry") or "",
-        "experienceRequirements": posting.get("experienceRequirements") or "",
-        "educationRequirements": posting.get("educationRequirements") or "",
-        "employmentType": posting.get("employmentType") or "",
-        "datePosted": posting.get("datePosted") or "",
-        "companyName": org.get("name") or "",
-        "companyUrl": org.get("sameAs") or "",
-        "streetAddress": place.get("streetAddress") or "",
-    }
+    return ParsedDetail(
+        title=posting.get("title") or "",
+        description=description,
+        responsibilities=responsibilities,
+        requirements=requirements,
+        industry=posting.get("industry") or "",
+        experienceRequirements=posting.get("experienceRequirements") or "",
+        educationRequirements=posting.get("educationRequirements") or "",
+        employmentType=posting.get("employmentType") or "",
+        datePosted=posting.get("datePosted") or "",
+        companyName=org.get("name") or "",
+        companyUrl=org.get("sameAs") or "",
+        streetAddress=place.get("streetAddress") or "",
+    )

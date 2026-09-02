@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
 
 from sqlalchemy import JSON, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -50,27 +49,6 @@ class JobRecord(Base):
 
     __table_args__ = (Index("ix_jobs_salary_high", "salaryHighWan"),)
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "jobId": self.jobId,
-            "jobType": self.jobType,
-            "jobName": self.jobName,
-            "company": self.company,
-            "location": self.location,
-            "salary": self.salary,
-            "salaryLowWan": self.salaryLowWan,
-            "salaryHighWan": self.salaryHighWan,
-            "education": self.education,
-            "workYears": self.workYears,
-            "industry": self.industry,
-            "companyTags": self.companyTags or [],
-            "financingStage": self.financingStage,
-            "companySize": self.companySize,
-            "companyLogo": self.companyLogo,
-            "jobDetailUrl": self.jobDetailUrl,
-            "searchKeyword": self.searchKeyword,
-            "searchTime": _iso(self.searchTime),
-        }
 
 
 class JobDetailRecord(Base):
@@ -101,24 +79,6 @@ class JobDetailRecord(Base):
     status: Mapped[str] = mapped_column(String, default="", index=True)
     fetchTime: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "jobId": self.jobId,
-            "title": self.title,
-            "description": self.description,
-            "responsibilities": self.responsibilities,
-            "requirements": self.requirements,
-            "industry": self.industry,
-            "experienceRequirements": self.experienceRequirements,
-            "educationRequirements": self.educationRequirements,
-            "employmentType": self.employmentType,
-            "datePosted": self.datePosted,
-            "companyName": self.companyName,
-            "companyUrl": self.companyUrl,
-            "streetAddress": self.streetAddress,
-            "status": self.status,
-            "fetchTime": _iso(self.fetchTime),
-        }
 
 
 class ApplicationRecord(Base):
@@ -136,16 +96,3 @@ class ApplicationRecord(Base):
     status: Mapped[str] = mapped_column(String, default="", index=True)
     message: Mapped[str] = mapped_column(Text, default="")
     appliedAt: Mapped[datetime] = mapped_column(DateTime, default=_now)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "jobId": self.jobId,
-            "status": self.status,
-            "message": self.message,
-            "appliedAt": _iso(self.appliedAt),
-        }
-
-
-def _iso(value: datetime | None) -> str:
-    return value.isoformat(sep=" ", timespec="seconds") if value else ""

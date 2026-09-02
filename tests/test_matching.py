@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_job
+from conftest import make_detail, make_job
+from job_agent.core.analysis import AnalysisRow
 from job_agent.core.matching import (
     MatchRules,
     load_rules,
@@ -38,8 +39,8 @@ def write(path: Path, text: str) -> Path:
 # ---------------------------------------------------------------- 加载与校验
 
 
-def test_load_rules(project_root):
-    rules = load_rules(project_root / "config" / "match.toml")
+def test_load_rules(profile_dir):
+    rules = load_rules(profile_dir / "match.toml")
     assert [s.name for s in rules.signals] == ["Agent", "Python", "算法训练岗"]
     assert rules.options.title_multiplier == 2.0
     assert rules.require.penalty == -20.0
@@ -89,8 +90,8 @@ def rules_of(*signals: tuple[str, float, str], require: str | None = None) -> Ma
     return MatchRules.model_validate(data)
 
 
-def row(title: str = "工程师", description: str = "") -> dict:
-    return {"jobId": 1, "jobName": title, "company": "某公司", "description": description}
+def row(title: str = "工程师", description: str = "") -> AnalysisRow:
+    return AnalysisRow(jobId=1, jobName=title, company="某公司", description=description)
 
 
 def test_title_hit_is_doubled():
@@ -150,7 +151,7 @@ AGENT_JD = "岗位职责：负责 Agent 平台建设\n任职要求：熟悉 Pyth
 BACKEND_JD = "岗位职责：负责订单服务\n任职要求：熟悉 Java、MySQL 与分布式"
 
 
-def test_rank_orders_by_score(context, project_root):
+def test_rank_orders_by_score(context, profile_dir):
     context.jobs.upsert_many(
         [
             make_job(1, jobName="Agent 工程师", salary="80-100k·15薪"),
@@ -158,30 +159,30 @@ def test_rank_orders_by_score(context, project_root):
         ],
         keyword="AI Agent",
     )
-    context.details.upsert({"jobId": 1, "description": AGENT_JD, "status": "ok"})
-    context.details.upsert({"jobId": 2, "description": BACKEND_JD, "status": "ok"})
+    context.details.upsert(make_detail(1, description=AGENT_JD))
+    context.details.upsert(make_detail(2, description=BACKEND_JD))
 
-    rules = load_rules(project_root / "config" / "match.toml")
+    rules = load_rules(profile_dir / "match.toml")
     ranked = rank(context.db, context.settings, rules)
     assert [j.job_id for j in ranked] == [1, 2]
     assert ranked[0].score > ranked[1].score
 
 
-def test_rank_attaches_salary_band(context, project_root):
+def test_rank_attaches_salary_band(context, profile_dir):
     """薪资只有税前一种口径，直接来自 JD 文案的解析结果。"""
     context.jobs.upsert_many(
         [make_job(1, jobName="Agent 工程师", salary="80-100k·15薪")], keyword="AI Agent"
     )
-    context.details.upsert({"jobId": 1, "description": AGENT_JD, "status": "ok"})
+    context.details.upsert(make_detail(1, description=AGENT_JD))
 
-    rules = load_rules(project_root / "config" / "match.toml")
+    rules = load_rules(profile_dir / "match.toml")
     job = rank(context.db, context.settings, rules)[0]
     # 80-100k·15薪 = 120–150 万
     assert job.salary_low == pytest.approx(120.0)
     assert job.salary_high == pytest.approx(150.0)
 
 
-def test_rank_filters_by_salary_ceiling(context, project_root):
+def test_rank_filters_by_salary_ceiling(context, profile_dir):
     """门槛过滤的是**上限**：下限低但上限够高的岗位必须留下。"""
     context.jobs.upsert_many(
         [
@@ -191,31 +192,31 @@ def test_rank_filters_by_salary_ceiling(context, project_root):
         keyword="AI Agent",
     )
     for job_id in (1, 2):
-        context.details.upsert({"jobId": job_id, "description": AGENT_JD, "status": "ok"})
+        context.details.upsert(make_detail(job_id, description=AGENT_JD))
 
-    rules = load_rules(project_root / "config" / "match.toml")
+    rules = load_rules(profile_dir / "match.toml")
     ranked = rank(context.db, context.settings, rules, floor_wan=135.0)
     assert [j.job_id for j in ranked] == [1]
 
 
-def test_rank_skips_jobs_without_jd(context, project_root):
+def test_rank_skips_jobs_without_jd(context, profile_dir):
     context.jobs.upsert_many([make_job(1, jobName="Agent 工程师")], keyword="AI Agent")
-    context.details.upsert({"jobId": 1, "description": "", "status": "no_jd"})
+    context.details.upsert(make_detail(1, status="no_jd"))
 
-    rules = load_rules(project_root / "config" / "match.toml")
+    rules = load_rules(profile_dir / "match.toml")
     assert rank(context.db, context.settings, rules) == []
 
 
 # ---------------------------------------------------------------- 清单渲染
 
 
-def test_shortlist_leaves_judgement_blank(context, project_root, settings):
+def test_shortlist_leaves_judgement_blank(context, profile_dir, settings):
     context.jobs.upsert_many(
         [make_job(1, jobName="Agent 工程师", salary="80-100k·15薪")], keyword="AI Agent"
     )
-    context.details.upsert({"jobId": 1, "description": AGENT_JD, "status": "ok"})
+    context.details.upsert(make_detail(1, description=AGENT_JD))
 
-    rules = load_rules(project_root / "config" / "match.toml")
+    rules = load_rules(profile_dir / "match.toml")
     ranked = rank(context.db, context.settings, rules)
     markdown = render_shortlist(ranked, settings, limit=5)
 
@@ -230,16 +231,14 @@ def test_shortlist_leaves_judgement_blank(context, project_root, settings):
     assert "薪资按上限过滤" in markdown
 
 
-def test_shortlist_limit_is_respected(context, project_root, settings):
+def test_shortlist_limit_is_respected(context, profile_dir, settings):
     jobs = [make_job(i, jobName=f"Agent 工程师 {i}", salary="80-100k·15薪") for i in range(1, 6)]
     context.jobs.upsert_many(jobs, keyword="AI Agent")
     for i in range(1, 6):
         # JD 各不相同，否则会被按正文去重
-        context.details.upsert(
-            {"jobId": i, "description": f"{AGENT_JD}\n项目编号 {i}", "status": "ok"}
-        )
+        context.details.upsert(make_detail(i, description=f"{AGENT_JD}\n项目编号 {i}"))
 
-    rules = load_rules(project_root / "config" / "match.toml")
+    rules = load_rules(profile_dir / "match.toml")
     ranked = rank(context.db, context.settings, rules)
     assert len(ranked) == 5
 
@@ -301,7 +300,7 @@ def test_shipped_template_is_valid():
     """仓库里的模板必须始终可解析——它是所有用户的起点。"""
     from job_agent.config import find_project_root
 
-    rules = load_rules(find_project_root() / "config" / "match.example.toml")
+    rules = load_rules(find_project_root() / "config" / "templates" / "match.toml")
     assert len(rules.signals) >= 20
     assert any(s.weight > 0 for s in rules.signals)
     assert any(s.weight < 0 for s in rules.signals)

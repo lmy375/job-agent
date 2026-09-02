@@ -15,7 +15,6 @@ from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
-from job_agent.core.storage.migrations import run_migrations
 from job_agent.core.storage.models import Base
 from job_agent.errors import StorageError
 from job_agent.log import get_logger
@@ -49,13 +48,28 @@ class Database:
         return cls(settings.storage.database, echo=echo)
 
     def setup(self) -> Database:
-        """建表 + 跑轻量迁移。幂等，每个入口启动时调一次即可。"""
+        """建表。幂等，每个入口启动时调一次即可。
+
+        **不做迁移**：库结构变了就 `job reset` 删库重建（见 CLAUDE.md 硬规则）。
+        """
         try:
             Base.metadata.create_all(self.engine)
-            run_migrations(self.engine)
         except SQLAlchemyError as exc:
             raise StorageError(f"数据库初始化失败（{self.path}）：{exc}") from exc
         return self
+
+    def drop(self) -> list[Path]:
+        """删掉数据库文件（连同 WAL / SHM 边车），返回真正删掉的路径。
+
+        删文件而不是 DROP TABLE：schema 变更后残留的旧表、旧索引也要一并清掉。
+        """
+        self.dispose()
+        removed: list[Path] = []
+        for path in (self.path, *(Path(f"{self.path}{s}") for s in ("-wal", "-shm"))):
+            if path.is_file():
+                path.unlink()
+                removed.append(path)
+        return removed
 
     @contextmanager
     def session(self) -> Iterator[Session]:

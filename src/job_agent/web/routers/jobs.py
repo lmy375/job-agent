@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query
 
 from job_agent.core.services import ApplyService
-from job_agent.core.storage import JobQuery
+from job_agent.core.storage import JobBundle, JobQuery
 from job_agent.core.storage.repositories import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from job_agent.web.deps import ContextDep
 from job_agent.web.schemas import ApplyRequest, ApplyResponse, JobListResponse
@@ -46,10 +46,10 @@ def list_jobs(
     return JobListResponse(total=page.total, limit=limit, offset=offset, jobs=page.items)
 
 
-@router.get("/{job_id}", summary="单条职位（含 JD 与投递记录）")
+@router.get("/{job_id}", response_model=JobBundle, summary="单条职位（含 JD 与投递记录）")
 def get_job(
     context: ContextDep, job_id: Annotated[int, Path(description="职位 ID")]
-) -> dict[str, Any]:
+) -> JobBundle:
     job = context.jobs.get_with_detail(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail=f"职位 {job_id} 不在数据库中")

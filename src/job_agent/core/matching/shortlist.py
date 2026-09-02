@@ -36,7 +36,7 @@ def _excerpt(text: str, limit: int = EXCERPT_LEN) -> str:
 def _salary_cell(job: ScoredJob) -> str:
     low, high = job.salary_low, job.salary_high
     if low is None or high is None:
-        return job.row.get("salary") or "未标"
+        return job.row.salary or "未标"
     return f"{low:.0f}–{high:.0f} 万"
 
 
@@ -89,17 +89,15 @@ def render_shortlist(
     for index, job in enumerate(selected, 1):
         row = job.row
         company = " · ".join(
-            part
-            for part in (job.company, row.get("companySize"), row.get("financingStage"))
-            if part
+            part for part in (job.company, row.companySize, row.financingStage) if part
         )
         conditions = " · ".join(
             part
             for part in (
-                row.get("workYears") or "经验不限",
-                row.get("education") or "学历不限",
-                row.get("location"),
-                row.get("industry"),
+                row.workYears or "经验不限",
+                row.education or "学历不限",
+                row.location,
+                row.industry,
             )
             if part
         )
@@ -107,26 +105,26 @@ def render_shortlist(
             f"## {index}. {job.title}",
             "",
             f"- **公司**：{company}",
-            f"- **薪资**：{row.get('salary') or '未标'} → {_salary_cell(job)}",
+            f"- **薪资**：{row.salary or '未标'} → {_salary_cell(job)}",
             f"- **条件**：{conditions}",
-            f"- **赛道 / 角色**：{row.get('track') or '—'} / {row.get('role') or '—'}"
-            f" · 命中关键词「{row.get('keyword') or '—'}」",
+            f"- **赛道 / 角色**：{row.track or '—'} / {row.role or '—'}"
+            f" · 命中关键词「{row.keyword or '—'}」",
             f"- **匹配分**：{job.score:.0f}",
         ]
         if job.hits:
             lines.append(f"- **命中信号**：{job.reasons()}")
         if job.penalties:
             lines.append(f"- **扣分信号**：{job.concerns()}")
-        if (row.get("dupes") or 1) > 1:
+        if row.dupes > 1:
             lines.append(
-                f"- **注意**：同一份 JD 被 {row['dupes']} 家挂出（已按正文去重，保留标价最高的）"
+                f"- **注意**：同一份 JD 被 {row.dupes} 家挂出（已按正文去重，保留标价最高的）"
             )
         lines += [
-            f"- **链接**：{row.get('url') or '—'}",
+            f"- **链接**：{row.url or '—'}",
             "",
             "<details><summary>JD 摘录</summary>",
             "",
-            f"{_excerpt(row.get('description') or '')}",
+            f"{_excerpt(row.description)}",
             "",
             "</details>",
             "",
@@ -146,7 +144,7 @@ def render_shortlist(
         "## 未进前列但已评分的岗位",
         "",
         f"共 {max(len(jobs) - len(selected), 0)} 条。跑 `job match --top 50` 看完整排序，",
-        "或调 `config/match.toml` 里的权重后重跑——**分数低不等于不合适**，",
+        "或调 `match.toml` 里的权重后重跑——**分数低不等于不合适**，",
         "只说明它和你配置的信号表重合度低。",
         "",
     ]

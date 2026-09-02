@@ -11,7 +11,8 @@
 from __future__ import annotations
 
 import re
-from typing import NamedTuple
+
+from pydantic import BaseModel, ConfigDict
 
 #: 「35-45k·15薪」/「10-18k」；月数缺省按 12 薪
 _SALARY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)k(?:·(\d+)薪)?", re.I)
@@ -19,8 +20,10 @@ _SALARY_RE = re.compile(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)k(?:·(\d+)薪)?"
 DEFAULT_MONTHS = 12.0
 
 
-class SalaryBand(NamedTuple):
+class SalaryBand(BaseModel):
     """年薪区间，单位万元。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     low: float
     high: float
@@ -39,4 +42,6 @@ def parse_salary(salary: str | None) -> SalaryBand | None:
         return None
     low, high = float(match.group(1)), float(match.group(2))
     months = float(match.group(3)) if match.group(3) else DEFAULT_MONTHS
-    return SalaryBand(round(low * months / 10, 2), round(high * months / 10, 2), months)
+    return SalaryBand(
+        low=round(low * months / 10, 2), high=round(high * months / 10, 2), months=months
+    )

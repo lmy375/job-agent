@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from conftest import make_job
+from conftest import make_detail, make_job
 from job_agent.context import AppContext
 from job_agent.core.liepin.errors import LiepinRateLimited
 from job_agent.core.liepin.models import ApplyJobResult
@@ -32,7 +33,7 @@ def seeded(context):
         ],
         keyword="AI Agent",
     )
-    context.details.upsert({"jobId": 1, "description": AI_JD, "status": "ok"})
+    context.details.upsert(make_detail(1, description=AI_JD))
     return context
 
 
@@ -96,10 +97,20 @@ def test_stats_and_tracks(client, seeded):
     assert "rows" not in tracks
 
 
-def test_config_is_redacted(client):
+def test_config_masks_secrets(client):
+    """接口把整棵配置树返回给前端，密钥必须是打码后的（SecretStr 自动完成）。"""
     body = client.get("/api/config").json()
-    assert body["token"] in (None, "已配置")
+    assert body["settings"]["liepin"]["accounts"]["default"]["user_token"] == "**********"
+    assert "test-token" not in json.dumps(body)
     assert body["paths"]["database"].endswith("test.db")
+
+
+def test_config_reports_current_profile(client):
+    """一次只服务一个 profile，界面得能看出来在看谁的数据。"""
+    body = client.get("/api/config").json()
+    assert body["paths"]["profile"] == "test"
+    for key in ("database", "resume", "profileDir"):
+        assert "profiles/test" in body["paths"][key], key
 
 
 def test_apply_flow(client, seeded, monkeypatch):
@@ -179,10 +190,10 @@ def test_report_task_fails_without_jd(client):
 
 
 def test_search_task_requires_token(client, context, monkeypatch):
-    monkeypatch.setattr(context.settings, "token", None)
+    monkeypatch.setattr(context.settings.account, "user_token", None)
     response = client.post("/api/tasks", json={"kind": "search"})
     assert response.status_code == 400
-    assert "TOKEN" in response.json()["detail"]
+    assert "user_token" in response.json()["detail"]
 
 
 def test_task_404_and_cancel(client):

@@ -11,14 +11,14 @@ import random
 import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
 
 import requests
+from pydantic import BaseModel, ConfigDict, Field
 
 from job_agent.config import Settings
-from job_agent.core.jd_parser import EMPTY_DETAIL, parse_detail
+from job_agent.core.jd_parser import ParsedDetail, parse_detail
 from job_agent.core.services.progress import Progress, ProgressHook
-from job_agent.core.storage import DetailRepository, JobRepository
+from job_agent.core.storage import DetailRepository, JobDetailRow, JobRepository
 from job_agent.log import get_logger
 
 logger = get_logger(__name__)
@@ -31,11 +31,12 @@ PROGRESS_EVERY = 10
 SECONDS_PER_JOB = 4
 
 
-@dataclass(slots=True)
-class DetailSummary:
+class DetailSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     total: int = 0
     fetched: int = 0
-    statuses: Counter[str] = field(default_factory=Counter)
+    statuses: Counter[str] = Field(default_factory=Counter)
     elapsed: float = 0.0
     #: 非空表示提前结束（目前只有「已取消」一种）
     aborted_reason: str | None = None
@@ -87,7 +88,7 @@ class DetailService:
         )
 
         started = time.monotonic()
-        for index, (job_id, url) in enumerate(targets, 1):
+        for index, target in enumerate(targets, 1):
             if stop_check is not None and stop_check():
                 summary.aborted_reason = "已取消"
                 self.progress.emit(
@@ -97,10 +98,12 @@ class DetailService:
                     level="warn",
                 )
                 break
-            detail = self.fetch_one(url)
-            self.details.upsert({"jobId": job_id, **detail})
+            parsed, status = self.fetch_one(target.jobDetailUrl)
+            self.details.upsert(
+                JobDetailRow(jobId=target.jobId, status=status, **parsed.model_dump())
+            )
             summary.fetched += 1
-            summary.statuses[detail["status"]] += 1
+            summary.statuses[status] += 1
 
             if index % PROGRESS_EVERY == 0 or index == summary.total:
                 elapsed = time.monotonic() - started
@@ -123,9 +126,10 @@ class DetailService:
             )
         return summary
 
-    def fetch_one(self, url: str) -> dict[str, str]:
-        """抓一个详情页并解析，返回带 ``status`` 的字段字典（不落库）。
+    def fetch_one(self, url: str) -> tuple[ParsedDetail, str]:
+        """抓一个详情页并解析，返回 ``(解析结果, status)``（不落库）。
 
+        抓不到内容时解析结果是一个空 :class:`ParsedDetail`，状态说明失败原因。
         403/429 视为被限流：长退避后重试，重试用尽才记为 ``blocked``。
         """
         config = self.settings.detail
@@ -134,7 +138,7 @@ class DetailService:
                 resp = self._session.get(url, timeout=config.timeout)
             except requests.RequestException as exc:
                 if attempt == config.max_retries:
-                    return {**EMPTY_DETAIL, "status": f"error:{type(exc).__name__}"}
+                    return ParsedDetail(), f"error:{type(exc).__name__}"
                 self.sleeper(5 * attempt)
                 continue
 
@@ -146,15 +150,15 @@ class DetailService:
                 self.sleeper(config.block_backoff)
                 continue
             if not resp.ok:
-                return {**EMPTY_DETAIL, "status": f"http_{resp.status_code}"}
+                return ParsedDetail(), f"http_{resp.status_code}"
 
             parsed = parse_detail(resp.text)
             if parsed is None:
                 # 页面没有 JobPosting，多为职位已下线
-                return {**EMPTY_DETAIL, "status": "no_jd"}
-            return {**parsed, "status": "ok"}
+                return ParsedDetail(), "no_jd"
+            return parsed, "ok"
 
-        return {**EMPTY_DETAIL, "status": "blocked"}
+        return ParsedDetail(), "blocked"
 
     def close(self) -> None:
         if self._owns_session:

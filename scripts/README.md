@@ -10,9 +10,11 @@ uv run python scripts/audit_classification.py --track 安全
 uv run python scripts/track_stats.py
 uv run python scripts/salary_percentiles.py
 uv run python scripts/keyword_coverage.py
-uv run python scripts/export_jobs.py --format csv -o data/jobs.csv
-uv run python scripts/import_legacy_csv.py data/jobs.csv
+uv run python scripts/export_jobs.py --format csv -o jobs.csv
 ```
+
+每个脚本都接 `--profile / -p <名字>` 指定看哪个 profile 的库，不带就是默认那个
+（`job profile list` 看有哪些）。
 
 | 脚本 | 用途 |
 | --- | --- |
@@ -21,7 +23,6 @@ uv run python scripts/import_legacy_csv.py data/jobs.csv
 | `salary_percentiles.py` | 各赛道薪资分位数与「真正达标」比例 |
 | `keyword_coverage.py` | 每个搜索关键词的产出、去重损耗、是否撞到 120 条上限、赛道归属是否配好 |
 | `export_jobs.py` | 导出 CSV / JSON（丢给 Excel 或别的工具用） |
-| `import_legacy_csv.py` | 把早期的 `jobs.csv` 导进数据库 |
 
 写新脚本时的约定：只调 `job_agent.core` 的公开接口，不要重复实现统计逻辑——
 一旦口径分叉，两边的数字就再也对不上了。

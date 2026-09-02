@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from pydantic import BaseModel, ConfigDict, Field
 
 from job_agent.core.liepin import LiepinClient, LiepinError, LiepinRateLimited
 from job_agent.core.liepin.constants import JOB_KINDS
@@ -16,8 +16,9 @@ from job_agent.log import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass(slots=True)
-class ApplyOutcome:
+class ApplyOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     jobId: int
     status: str  # ok / already_applied / closed / failed / error / skipped
     message: str
@@ -28,10 +29,11 @@ class ApplyOutcome:
         return self.status == "ok"
 
 
-@dataclass(slots=True)
-class ApplySummary:
-    outcomes: list[ApplyOutcome] = field(default_factory=list)
-    remaining: list[int] = field(default_factory=list)
+class ApplySummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcomes: list[ApplyOutcome] = Field(default_factory=list)
+    remaining: list[int] = Field(default_factory=list)
     aborted_reason: str | None = None
 
     @property
@@ -68,8 +70,8 @@ class ApplyService:
 
         for index, job_id in enumerate(job_ids, 1):
             job = self.jobs.get(job_id)
-            kind = job_kind or (job["jobType"] if job else None)
-            label = f"{job['jobName']} @ {job['company']}" if job else "（不在数据库中）"
+            kind = job_kind or (job.jobType if job else None)
+            label = f"{job.jobName} @ {job.company}" if job else "（不在数据库中）"
 
             if not kind:
                 outcome = ApplyOutcome(

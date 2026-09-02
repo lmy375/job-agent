@@ -1,4 +1,4 @@
-"""载入 ``config/insights`` 下人工撰写的定性结论。
+"""载入 profile 的 ``insights/``（``settings.report.insights_dir``）下人工撰写的定性结论。
 
 这部分刻意做成「用户自己的素材」而不是代码里的字符串常量：
 它是对某一批数据的解读，会随数据版本重写，属于内容而非逻辑。
@@ -8,8 +8,9 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field
 from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from job_agent.log import get_logger
 from job_agent.tracks import AI, BACKEND, SEC, WEB3, Track
@@ -36,9 +37,10 @@ LEVELS: dict[str, tuple[str, str]] = {
 }
 
 
-@dataclass(slots=True)
-class MatchRow:
+class MatchRow(BaseModel):
     """能力项 × 市场需求 × 简历现状的一行。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     capability: str
     level: str
@@ -46,13 +48,14 @@ class MatchRow:
     resume: str
 
 
-@dataclass(slots=True)
-class Insights:
-    tracks: dict[Track, str] = field(default_factory=dict)
+class Insights(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tracks: dict[Track, str] = Field(default_factory=dict)
     advice: str = ""
-    match_rows: list[MatchRow] = field(default_factory=list)
+    match_rows: list[MatchRow] = Field(default_factory=list)
     #: 加载过程中的问题，报告页脚会提示
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
     def for_track(self, track: Track) -> str:
         return self.tracks.get(track, "")

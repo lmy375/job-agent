@@ -3,7 +3,7 @@
 **这张表是配置，不是代码。** 它编码的是「这个人想要什么」：
 对一个做 AI 应用工程的候选人，「预训练 / 强化学习」是负信号；
 对一个做算法的候选人，同一个词是最强的正信号。所以它必须住在
-``config/match.toml``，由 ``/job-init`` 访谈后生成，换人就整份重写。
+profile 目录下的 ``match.toml``，由 ``/job-init`` 访谈后生成，换人就整份重写。
 
 代码这边只负责三件事：读、校验、编译正则。判断权重高低是用户的事。
 """
@@ -116,7 +116,9 @@ class MatchRules(_Model):
 
 
 def load_rules(path: Path) -> MatchRules:
-    """读 ``config/match.toml``。缺文件、TOML 语法错、正则写错都抛 :class:`ConfigError`。
+    """读信号表（``settings.match.rules``，即 profile 目录下的 ``match.toml``）。
+
+    缺文件、TOML 语法错、正则写错都抛 :class:`ConfigError`。
 
     刻意不做「文件不存在就用空表兜底」——空表会让 ``job match`` 输出一份
     全是 0 分的排名，看起来像跑成功了，实际毫无意义。宁可直接报错。

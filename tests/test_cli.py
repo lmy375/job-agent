@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
-from conftest import make_job
+from conftest import PROFILE, make_detail, make_job
 from job_agent.cli import app
 from job_agent.context import AppContext
 from job_agent.core.liepin.errors import LiepinRateLimited
 from job_agent.core.liepin.models import ApplyJobResult
+from job_agent.core.storage import Database, JobRepository
 
 runner = CliRunner()
 
@@ -24,8 +26,10 @@ def config_path(project_root: Path) -> Path:
     return project_root / "config" / "config.toml"
 
 
-def run(config_path: Path, *args: str):
-    return runner.invoke(app, ["--config", str(config_path), *args])
+def run(config_path: Path, *args: str, input: str | None = None):
+    return runner.invoke(
+        app, ["--profile", PROFILE, "--config", str(config_path), *args], input=input
+    )
 
 
 def test_version():
@@ -58,46 +62,88 @@ def test_config_show_json(config_path):
 
 
 def test_config_validate_fails_without_token(project_root, config_path, monkeypatch):
-    monkeypatch.delenv("LIEPIN_USER_TOKEN", raising=False)
-    (project_root / "config" / ".env").unlink()
+    monkeypatch.delenv("JOB_AGENT_LIEPIN__USER_TOKEN", raising=False)
+    text = config_path.read_text(encoding="utf-8").replace('user_token = "test-token"', "")
+    config_path.write_text(text, encoding="utf-8")
     result = run(config_path, "config", "validate")
     assert result.exit_code == 2
-    assert "LIEPIN_USER_TOKEN" in result.stdout
+    assert "user_token" in result.stdout
 
 
-def test_config_init_copies_all_templates(tmp_path, monkeypatch):
-    """init 要把仓库里的每份模板都落地，缺一个用户就会卡在那一步。"""
+@pytest.fixture
+def fresh_root(tmp_path, monkeypatch) -> Path:
+    """一个只有仓库模板、还没初始化过的项目根——模拟新克隆。"""
     root = tmp_path / "proj"
     (root / "config").mkdir(parents=True)
     repo_root = Path(__file__).resolve().parents[1]
-    for name in (
-        "config.example.toml",
-        ".env.example",
-        "resume.example.md",
-        "preferences.example.md",
-    ):
-        (root / "config" / name).write_text(
-            (repo_root / "config" / name).read_text(encoding="utf-8"), encoding="utf-8"
-        )
-    shutil.copytree(repo_root / "config" / "insights.example", root / "config" / "insights.example")
-
+    shutil.copyfile(
+        repo_root / "config" / "config.example.toml", root / "config" / "config.example.toml"
+    )
+    shutil.copytree(repo_root / "config" / "templates", root / "config" / "templates")
     monkeypatch.setenv("JOB_AGENT_HOME", str(root))
+    monkeypatch.delenv("JOB_AGENT_PROFILE_NAME", raising=False)
+    return root
+
+
+def test_config_init_creates_global_config(fresh_root):
+    """init 只管全局配置：profile 的骨架归 `job profile new`。"""
     result = runner.invoke(app, ["config", "init"])
     assert result.exit_code == 0
-    for name in ("config.toml", ".env", "resume.md", "preferences.md"):
-        assert (root / "config" / name).is_file(), name
-    assert (root / "config" / "insights" / "ai.html").is_file()
+    assert (fresh_root / "config" / "config.toml").is_file()
+    assert "job profile new" in result.stdout
 
     # 再跑一次不会覆盖已有内容
-    (root / "config" / "resume.md").write_text("我自己写的", encoding="utf-8")
+    (fresh_root / "config" / "config.toml").write_text("# 我自己写的", encoding="utf-8")
     result = runner.invoke(app, ["config", "init"])
     assert "已存在" in result.stdout
-    assert (root / "config" / "resume.md").read_text(encoding="utf-8") == "我自己写的"
+    assert (fresh_root / "config" / "config.toml").read_text(encoding="utf-8") == "# 我自己写的"
 
 
-def test_config_validate_reports_missing_profile_files(project_root, config_path):
-    (project_root / "config" / "resume.md").unlink()
-    (project_root / "config" / "preferences.md").unlink()
+def test_profile_new_copies_templates_and_sets_default(fresh_root):
+    """新建 profile = 把 config/templates/ 整份拷过去，第一个还顺手设成默认。"""
+    assert runner.invoke(app, ["config", "init"]).exit_code == 0
+    result = runner.invoke(app, ["profile", "new", "me"])
+    assert result.exit_code == 0
+    for name in ("profile.toml", "resume.md", "preferences.md", "match.toml"):
+        assert (fresh_root / "profiles" / "me" / name).is_file(), name
+    assert (fresh_root / "profiles" / "me" / "insights" / "ai.html").is_file()
+    assert (fresh_root / "profiles" / "me" / "data").is_dir()
+    # 第一个 profile 自动成为默认，不带 --profile 也能跑
+    assert 'default = "me"' in (fresh_root / "config" / "config.toml").read_text(encoding="utf-8")
+    assert "me" in runner.invoke(app, ["config", "path"]).stdout
+
+    # 已存在时不覆盖
+    assert runner.invoke(app, ["profile", "new", "me"]).exit_code == 2
+
+
+def test_profile_new_rejects_bad_names(fresh_root):
+    """名字就是目录名：路径穿越这类输入要在建目录之前挡掉。"""
+    assert runner.invoke(app, ["config", "init"]).exit_code == 0
+    for bad in ("../evil", "with space", ".hidden"):
+        assert runner.invoke(app, ["profile", "new", bad]).exit_code == 2
+
+
+def test_profiles_are_isolated(fresh_root):
+    """两个 profile 各写各的库：这是整个设计要保证的那件事。"""
+    assert runner.invoke(app, ["config", "init"]).exit_code == 0
+    assert runner.invoke(app, ["profile", "new", "a"]).exit_code == 0
+    assert runner.invoke(app, ["profile", "new", "b"]).exit_code == 0
+
+    paths = {}
+    for name in ("a", "b"):
+        result = runner.invoke(app, ["--profile", name, "config", "path", "--json"])
+        assert result.exit_code == 0, result.stdout
+        paths[name] = json.loads(result.stdout)
+
+    assert paths["a"]["database"] != paths["b"]["database"]
+    for key in ("database", "resume", "match", "report", "insightsDir"):
+        assert "profiles/a" in paths["a"][key], key
+        assert "profiles/b" in paths["b"][key], key
+
+
+def test_config_validate_reports_missing_profile_files(profile_dir, config_path):
+    (profile_dir / "resume.md").unlink()
+    (profile_dir / "preferences.md").unlink()
     result = run(config_path, "config", "validate")
     assert result.exit_code == 2
     assert "简历文件不存在" in result.stdout
@@ -117,10 +163,31 @@ def test_search_dry_run_does_not_hit_network(config_path, monkeypatch):
     assert "AI Agent（AI）" in result.stdout
 
 
-def test_db_info_and_migrate(config_path):
+def test_db_info(config_path):
     assert run(config_path, "db", "info").exit_code == 0
-    result = run(config_path, "db", "migrate")
-    assert "无需迁移" in result.stdout
+
+
+def test_reset_needs_confirmation(config_path, context):
+    """删库不可撤销（投递记录只存在本地），默认必须确认一次。"""
+    context.jobs.upsert_many([make_job(1)], keyword="AI Agent")
+    context.applications.record(1, "ok", "应聘成功")
+
+    declined = run(config_path, "reset", input="n\n")
+    assert declined.exit_code != 0
+    assert context.settings.storage.database.is_file()
+    assert "投递记录删掉就找不回来了" in declined.stdout
+
+
+def test_reset_rebuilds_empty_db(config_path, context):
+    context.jobs.upsert_many([make_job(1)], keyword="AI Agent")
+    result = run(config_path, "reset", "--yes")
+    assert result.exit_code == 0
+    assert "已重建空库" in result.stdout
+
+    # 重新开一个连接来看：老连接握的是被删掉的 inode，看到的还是旧数据
+    fresh = Database(context.settings.storage.database).setup()
+    assert JobRepository(fresh).count() == 0
+    fresh.dispose()
 
 
 def test_report_without_data_exits_nonzero(config_path):
@@ -131,7 +198,7 @@ def test_report_without_data_exits_nonzero(config_path):
 
 def test_report_generates_file(config_path, context, insights_dir, tmp_path):
     context.jobs.upsert_many([make_job(1, salary="80-100k·15薪")], keyword="AI Agent")
-    context.details.upsert({"jobId": 1, "description": AI_JD, "status": "ok"})
+    context.details.upsert(make_detail(1, description=AI_JD))
     output = tmp_path / "r.html"
     result = run(config_path, "report", "-o", str(output))
     assert result.exit_code == 0
@@ -202,7 +269,7 @@ def seed_agent_job(context, job_id: int = 1, salary: str = "80-100k·20薪") -> 
     context.jobs.upsert_many(
         [make_job(job_id, jobName="Agent 平台工程师", salary=salary)], keyword="AI Agent"
     )
-    context.details.upsert({"jobId": job_id, "description": AI_JD, "status": "ok"})
+    context.details.upsert(make_detail(job_id, description=AI_JD))
 
 
 def test_help_lists_new_commands():
@@ -252,9 +319,9 @@ def test_match_floor_filters(config_path, context):
     assert "门槛太高" in result.stdout
 
 
-def test_match_missing_rules_file(config_path, project_root, context):
+def test_match_missing_rules_file(config_path, profile_dir, context):
     seed_agent_job(context)
-    (project_root / "config" / "match.toml").unlink()
+    (profile_dir / "match.toml").unlink()
     result = run(config_path, "match")
     assert result.exit_code == 2
     assert "匹配信号表不存在" in result.stderr
@@ -276,9 +343,9 @@ def test_shortlist_without_data_exits_nonzero(config_path):
     assert result.exit_code == 1
 
 
-def test_config_validate_reports_bad_match_rules(config_path, project_root):
+def test_config_validate_reports_bad_match_rules(config_path, profile_dir):
     """信号表里的正则写错，validate 就该报出来，而不是等 job match 炸。"""
-    (project_root / "config" / "match.toml").write_text(
+    (profile_dir / "match.toml").write_text(
         '[[signals]]\nname="x"\nweight=1\npattern="([unclosed"\n', encoding="utf-8"
     )
     result = run(config_path, "config", "validate")
@@ -312,11 +379,11 @@ def test_resume_import_to_file(config_path, tmp_path):
     assert "Agent 平台" in target.read_text(encoding="utf-8")
 
 
-def test_resume_import_refuses_to_clobber_resume_md(config_path, project_root, tmp_path):
+def test_resume_import_refuses_to_clobber_resume_md(config_path, profile_dir, tmp_path):
     """抽出来的是无结构文本，直接盖掉整理好的简历会丢排版和信息。"""
     source = tmp_path / "resume.md"
     source.write_text("负责 Agent 平台。" * 10, encoding="utf-8")
-    target = project_root / "config" / "resume.md"
+    target = profile_dir / "resume.md"
     before = target.read_text(encoding="utf-8")
 
     result = run(config_path, "resume", "import", str(source), "-o", str(target))

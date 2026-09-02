@@ -5,6 +5,8 @@ export default function OverviewView() {
   const [stats, setStats] = useState(null);
   const [tracks, setTracks] = useState(null);
   const [config, setConfig] = useState(null);
+  // /api/config 返回 { settings, paths, reportExists }：settings 就是脱敏后的配置树
+  const settings = config?.settings;
   const [error, setError] = useState("");
   const [loadingTracks, setLoadingTracks] = useState(false);
 
@@ -107,33 +109,48 @@ export default function OverviewView() {
         <>
           <h3 className="section-title">当前配置</h3>
           <p className="muted">
-            配置是文件，改它请编辑 <code>{config.paths.configFile}</code>，改完重启服务生效。
+            当前 profile 是 <code>{config.paths.profile}</code>——一个 profile 就是一个人 /
+            一种求职场景，简历、关键词、数据库都在它自己的目录里，和别的 profile 互不可见。
+            配置是文件：跟人无关的改 <code>{config.paths.configFile}</code>，
+            随人而变的改 <code>{config.paths.profileFile}</code>，改完重启服务生效。
             Web 端只读，避免出现「页面上改了但 CLI 跑的是另一套」。
           </p>
           <div className="table-wrap">
             <table className="kv">
               <tbody>
-                <Row k="配置文件" v={config.paths.configFile} />
+                <Row k="profile" v={`${config.paths.profile}（${config.paths.profileDir}）`} />
+                <Row k="全局配置" v={config.paths.configFile} />
+                <Row k="profile 配置" v={config.paths.profileFile} />
                 <Row k="数据库" v={config.paths.database} />
                 <Row k="简历" v={config.paths.resume} />
+                <Row k="匹配信号表" v={config.paths.match} />
                 <Row k="报告输出" v={`${config.paths.report}${config.reportExists ? "" : "（尚未生成）"}`} />
                 <Row k="insights 素材" v={config.paths.insightsDir} />
-                <Row k="token" v={config.token || "未配置"} />
-                <Row k="搜索地点" v={config.search.address} />
+                <Row
+                  k="猎聘账号"
+                  v={`${settings.profile.account}（token ${
+                    settings.liepin.accounts[settings.profile.account]?.user_token
+                      ? "已配置"
+                      : "未配置"
+                  }）`}
+                />
+                <Row k="搜索地点" v={settings.search.address} />
                 <Row
                   k="薪资门槛"
-                  v={`${config.search.salary_kind || "—"} ${
-                    config.search.salary_floor ? config.search.salary_floor / 10000 + " 万起" : "不限"
+                  v={`${settings.search.salary_kind || "—"} ${
+                    settings.search.salary_floor
+                      ? settings.search.salary_floor / 10000 + " 万起"
+                      : "不限"
                   }`}
                 />
                 <Row
                   k="启用的关键词"
-                  v={config.search.groups
+                  v={settings.search.groups
                     .filter((g) => g.enabled)
                     .map((g) => `${g.track}：${g.keywords.join("、")}`)
                     .join("　|　")}
                 />
-                <Row k="接口限速" v={`${config.liepin.rate_limit_per_min} 次/分钟`} />
+                <Row k="接口限速" v={`${settings.liepin.rate_limit_per_min} 次/分钟`} />
               </tbody>
             </table>
           </div>

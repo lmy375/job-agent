@@ -7,16 +7,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
 
 from job_agent.log import get_logger
 
 Level = Literal["info", "warn", "error"]
 
 
-@dataclass(slots=True)
-class ProgressEvent:
+class ProgressEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     message: str
     current: int | None = None
     total: int | None = None

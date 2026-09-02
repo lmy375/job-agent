@@ -1,50 +1,31 @@
-# job-agent 配置文件模板
+# job-agent 全局配置模板
 #
 # 复制为 config/config.toml 后按需修改（`job config init` 会自动完成这一步）。
 # config.toml 不进版本库；这份模板进版本库。
-# 所有相对路径都相对于项目根目录（即包含 config/ 的那一层）。
 #
-# 密钥不放这里：token 写在 config/.env（见 config/.env.example）。
+# 配置分两个文件，段名互不重叠（放错了会当场报错，并告诉你该放哪）：
+#
+#   config/config.toml            ← 就是这份。管「怎么连」：猎聘账号密钥、限速、
+#                                   模型接入点、Web 端口、日志。跟人无关，所有
+#                                   profile 共享一份。
+#   profiles/<名字>/profile.toml   管「找什么」：简历、求职偏好、搜索条件与关键词、
+#                                   匹配门槛、报告。**随人而变**，一个 profile
+#                                   就是一个人 / 一种求职场景，数据库也各自独立。
+#
+# **密钥都写在这里**（猎聘 token、模型 API key、LangSmith key）——config.toml
+# 不进版本库，所以放心填；这份模板里一律留空。不想落盘的密钥可以改用环境变量：
+# 任意配置项都能用 JOB_AGENT_<节>__<字段> 覆盖，
+# 如 JOB_AGENT_LIEPIN__ACCOUNTS__DEFAULT__USER_TOKEN=…
+#
+# 这份文件里的相对路径相对于**项目根目录**（含 config/ 的那一层）；
+# profile.toml 里的相对路径相对于那个 profile 自己的目录。
 
-[profile]
-# 求职者信息。resume / preferences 是写报告「给我的建议」章节的输入，
-# 程序不解析内容，自由格式 Markdown 即可（`/job-init` skill 会引导你写）
-name = "你的名字"
-resume = "config/resume.md"
-preferences = "config/preferences.md"
-
-# ---------------------------------------------------------------- 搜索
-[search]
-address = "北京"          # 工作地点，服务端模糊匹配
-salary_kind = "年薪"      # 年薪 / 月薪；留空表示不按薪资过滤
-salary_floor = 1000000    # 薪资下限，单位为元。年薪 100 万 = 1000000
-# salary_cap = 3000000    # 薪资上限，单位为元，可省略
-# edu_level = "本科"       # 学历要求，取值见 README
-# work_experience = "5-10年"
-max_pages = 6             # 每个关键词翻几页；服务端硬上限 6 页（= 120 条）
-
-# 关键词按数组顺序（即优先级）依次搜索。因为按 jobId 去重，
-# 每个职位记录到的 searchKeyword 就是「最先命中它的方向」，
-# 所以把最想要的方向放在最前面。
-# track 用于分类兜底：职位名看不出赛道时，按关键词所属赛道 + JD 正文信号词判定。
-# 取值必须是 AI / Web3 / 安全 / 后端 之一。
-
-[[search.groups]]
-track = "AI"
-keywords = ["AI Agent", "大模型", "AI应用", "AI平台", "LLM", "AI工程"]
-
-[[search.groups]]
-track = "Web3"
-keywords = ["区块链", "智能合约", "Web3", "Solidity"]
-
-[[search.groups]]
-track = "安全"
-keywords = ["智能合约安全", "区块链安全", "安全研究", "安全专家"]
-
-[[search.groups]]
-track = "后端"
-enabled = false           # 关掉的组不会被搜索，但仍参与分类兜底
-keywords = ["后端架构师", "后端技术专家", "后端开发", "技术专家"]
+# ---------------------------------------------------------------- profile
+[profiles]
+dir = "profiles"          # profile 们放在哪
+# 不带 --profile 时用哪个。`job profile use <名字>` 会改这一行；
+# 留空且只有一个 profile 时自动用那个，有多个就必须显式指定
+# default = "default"
 
 # ---------------------------------------------------------------- 猎聘 API
 [liepin]
@@ -53,6 +34,17 @@ timeout = 30.0
 # 服务端限流实测约 10 次 / 60s 滑动窗口（不是 60 次/分钟），触发后冷却 20 分钟以上，
 # 所以这里默认留足余量取 8。调大有风险。
 rate_limit_per_min = 8
+
+# 猎聘账号。表名自己起，profile 的 [profile].account 指哪个用哪个——
+# 一个 profile 可能是「另一个人」，几个人的 token 得能长期并存，
+# 不用每次换人都回来重贴一遍。只有自己用就留一个 default 就行。
+# token 必填（没有它搜不了也投不了），前往 https://www.liepin.com/mcp/auth 生成，
+# 过期了回来换一行即可。
+[liepin.accounts.default]
+user_token = ""
+
+# [liepin.accounts.partner]
+# user_token = ""
 
 # ---------------------------------------------------------------- 详情页抓取
 [detail]
@@ -64,28 +56,81 @@ max_retries = 3
 timeout = 30.0
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
-# ---------------------------------------------------------------- 存储
-[storage]
-database = "data/jobs.db"
+# ------------------------------------------------- LangGraph 独立执行（可选）
+# 装了 agent extra（uv sync --extra agent）后，`job-agent` 一条命令跑完
+# 采集 → 分诊 → LLM 审读 → 投递计划。
+# 判断依据（简历/偏好/信号表）与上面共享，这里只有运行参数与密钥。
+[agent]
+# 用下面哪个接入点。换模型只改这一行（或跑的时候加 --provider deepseek）
+provider = "anthropic"
+top_n = 30                # 分诊后送 LLM 审读的岗位数上限（按条计费，这是成本闸门）
+max_concurrency = 4       # 并行审读上限，防 API 限流
+# 下面两个路径按**当前 profile 的目录**解析（不是项目根）：
+# 它们是每次运行的产物，必须跟着 profile 走，否则几个 profile 会互相覆盖
+checkpoint = "data/agent-checkpoint.db"
+plan_output = "data/agent-plan.md"
 
-# ---------------------------------------------------------------- 岗位匹配
-[match]
-# 信号表单独放一个文件：它是几十行的数据表，且**随人而变**
-# （做应用工程的人「预训练」是负信号，做算法的人是正信号）。
-# 不知道怎么填就跑 /job-init，它会访谈后生成。
-rules = "config/match.toml"
-shortlist_output = "data/shortlist.md"
-# 只看薪资**上限**不低于这个数的岗位（万元/年）。留空表示不过滤。
-# **全系统薪资一律按税前填写**（JD 标的就是税前），不做税后换算。
-# 按上限而不是下限过滤：上限才代表「这家最多能给到多少」，
-# 按下限过滤会误杀「50-80k·20薪」这类实际能谈上去的岗位。
-# salary_floor_wan = 135.0
+# 模型接入点。表名自己起，[agent].provider 指哪个就用哪个；几家的 key 长期并存，
+# 换模型不用来回粘贴密钥。客户端只有两类：
+#   api = "anthropic" → Claude 原生协议
+#   api = "openai"    → OpenAI 协议。ChatGPT、DeepSeek、Kimi、通义、GLM、
+#                       本地 vLLM/Ollama 都兼容它，区别只是 base_url
+# 也就是说，加一家新模型 = 抄一段下面的表，不用改代码。
+#
+# structured_output 是唯一要留意的坑：审读裁决必须是固定 schema 的 JSON，
+# 而各家的实现方式不同。官方端点留 "auto"（langchain 自己选：Claude 走 tool
+# calling、OpenAI 走 strict json_schema）；兼容端点如果报「不支持 json_schema /
+# response_format」，依次试 "function_calling" 和 "json_mode"
+#（json_mode 下 langchain 不发 schema，由 prompt 把 schema 带过去）。
+[agent.providers.anthropic]
+api = "anthropic"
+model = "claude-opus-5"
+api_key = ""              # 只跑 `job …`（skill 路线）的话不用填
+# max_tokens = 4096       # 审读裁决不长，默认够用
+# temperature = 0.0       # 调高只会让两次运行更不可比
 
-# ---------------------------------------------------------------- 报告
-[report]
-output = "data/job-report.html"
-# 报告里的定性结论与简历建议（HTML 片段 + 匹配矩阵），可自行改写
-insights_dir = "config/insights"
+[agent.providers.openai]
+api = "openai"
+model = "gpt-5"
+api_key = ""
+
+[agent.providers.deepseek]
+api = "openai"            # DeepSeek 兼容 OpenAI 协议，所以走同一个客户端
+model = "deepseek-chat"
+api_key = ""
+base_url = "https://api.deepseek.com/v1"
+structured_output = "function_calling"
+
+# OpenRouter：一个网关后面挂几百个模型，同样是 OpenAI 协议。
+# model 填 OpenRouter 的 slug（anthropic/claude-sonnet-5、deepseek/deepseek-chat、
+# z-ai/glm-5.2:free…）。:free 档位不花钱但有每日调用上限。
+# 特例：openrouter/free 是「免费模型路由器」，每次调用随机挑一个当前可用的免费
+# 模型——更省事，但同一批岗位可能由不同模型判，裁决口径不可比。
+[agent.providers.openrouter]
+api = "openai"
+model = "z-ai/glm-5.2:free"
+api_key = ""
+base_url = "https://openrouter.ai/api/v1"
+structured_output = "function_calling"
+
+# 自建 / 代理网关（LiteLLM、one-api、vLLM、Ollama…）：同样是 OpenAI 协议，
+# api = "openai"，base_url 指向自己的地址即可。公司内网网关就填这一类。
+# [agent.providers.litellm]
+# api = "openai"
+# model = "gpt-5.6"
+# api_key = "sk-…"
+# base_url = "https://litellm.example.com/v1"
+# structured_output = "function_calling"
+
+# LangSmith 运行追踪（可选）：填了 api_key 就启用，留空就完全不上报。
+# 只有一个必填项，不存在「配了一半、SDK 静默不上报」那种查不出原因的中间态。
+# key 在 https://smith.langchain.com 的 Settings → API Keys 里生成。
+[agent.langsmith]
+api_key = ""
+project = "job-agent"     # trace 归到哪个 project 下
+# 端点分区域，填错了 key 会验不过：留空 = 美区（api.smith.langchain.com），
+# 亚太区账号要显式填 https://apac.api.smith.langchain.com；自托管填自己的地址
+# endpoint = "https://apac.api.smith.langchain.com"
 
 # ---------------------------------------------------------------- Web 服务
 [web]

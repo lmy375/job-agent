@@ -21,9 +21,12 @@ PERCENTILES = (0.25, 0.5, 0.75, 0.9, 0.95)
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", type=float, default=100.0, help="目标年薪（万元）")
+    parser.add_argument(
+        "--profile", "-p", default=None, help="用哪个 profile（默认取 [profiles].default）"
+    )
     args = parser.parse_args()
 
-    context = AppContext.create()
+    context = AppContext.create(profile=args.profile)
     data = analyze(context.db, context.settings)
 
     header = (
@@ -35,8 +38,8 @@ def main() -> None:
     print(header)
     print("-" * 80)
 
-    for track, info in sorted(data["tracks"].items(), key=lambda kv: -kv[1]["count"]):
-        highs = sorted(row["salaryHigh"] for row in info["jobs"] if row["salaryHigh"])
+    for track, info in sorted(data.tracks.items(), key=lambda kv: -kv[1].count):
+        highs = sorted(row.salaryHigh for row in info.jobs if row.salaryHigh)
         if not highs:
             continue
         cells = "".join(f"{quantile(highs, p):.0f}".rjust(9) for p in PERCENTILES)

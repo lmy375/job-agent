@@ -1,6 +1,6 @@
-"""``job resume``：把已有简历文件转成文本，供 skill 整理进 ``config/resume.md``。
+"""``job resume``：把已有简历文件转成文本，供 skill 整理进 profile 的 ``resume.md``。
 
-刻意**不自动覆盖** ``config/resume.md``：抽出来的是一堆没有结构的文字，
+刻意**不自动覆盖** ``resume.md``：抽出来的是一堆没有结构的文字，
 直接写进去会得到一份排版稀烂、还可能丢掉数字的简历。
 默认打到 stdout，由 ``/job-init`` skill 接手整理——它会保留全部事实与数字、
 对齐市场词汇、缺信息时留 `<待补>`。
@@ -39,7 +39,7 @@ def import_resume(
         # 提示打到 stderr，这样 `job resume import x.pdf > out.txt` 不会把它混进正文
         typer.secho(
             f"\n（以上是 {source.name} 的纯文本，{len(text)} 字符。"
-            "下一步让 Claude 跑 /job-init 整理成 config/resume.md——"
+            "下一步让 Claude 跑 /job-init 整理成 profile 里的 resume.md——"
             "它会保留全部数字、对齐市场词汇，缺信息时留 <待补>。）",
             fg=typer.colors.BRIGHT_BLACK,
             err=True,

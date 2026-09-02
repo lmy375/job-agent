@@ -12,11 +12,16 @@ import csv
 import json
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from job_agent.context import AppContext
 from job_agent.core.analysis import load_rows
 from job_agent.core.storage import JobQuery
 from job_agent.core.storage.repositories import MAX_PAGE_SIZE
 
+#: 注意：``--with-jd`` 走的是分析行（AnalysisRow），它把这几列叫 salaryLow /
+#: salaryHigh / keyword / url，字段名对不上，所以那几列会导成空——
+#: 这是从 dict 时代就有的行为，迁移到 model 时按原样保留了。
 CSV_FIELDS = (
     "jobId",
     "jobName",
@@ -45,12 +50,16 @@ def main() -> None:
         action="store_true",
         help="带上赛道 / 角色 / JD 全文（只导出已抓到 JD 的，且已按正文去重）",
     )
+    parser.add_argument(
+        "--profile", "-p", default=None, help="用哪个 profile（默认取 [profiles].default）"
+    )
     args = parser.parse_args()
 
-    context = AppContext.create()
+    context = AppContext.create(profile=args.profile)
 
+    rows: list[BaseModel]
     if args.with_jd:
-        rows = load_rows(context.db, context.settings)
+        rows = list(load_rows(context.db, context.settings))
     else:
         rows = []
         offset = 0
@@ -63,8 +72,10 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.format == "json":
+        # skills 是统计阶段才填的中间量，不属于导出内容
+        dumped = [row.model_dump(mode="json", exclude={"skills"}) for row in rows]
         args.output.write_text(
-            json.dumps(rows, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+            json.dumps(dumped, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     else:
         fields = list(CSV_FIELDS) + (["track", "role"] if args.with_jd else [])
@@ -72,7 +83,7 @@ def main() -> None:
             writer = csv.DictWriter(fh, fieldnames=fields, extrasaction="ignore")
             writer.writeheader()
             for row in rows:
-                writer.writerow({k: row.get(k, "") for k in fields})
+                writer.writerow({k: getattr(row, k, "") for k in fields})
 
     print(f"已导出 {len(rows)} 条到 {args.output}")
     context.close()

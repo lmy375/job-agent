@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import argparse
 from collections import Counter
 
 from job_agent.context import AppContext
@@ -24,11 +25,17 @@ HARD_CAP = MAX_PAGE * PAGE_SIZE
 
 
 def main() -> None:
-    context = AppContext.create()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--profile", "-p", default=None, help="用哪个 profile（默认取 [profiles].default）"
+    )
+    args = parser.parse_args()
+
+    context = AppContext.create(profile=args.profile)
     settings = context.settings
 
-    raw_counts = {row["keyword"]: row["count"] for row in context.jobs.keyword_counts()}
-    deduped = Counter(row["keyword"] for row in load_rows(context.db, settings))
+    raw_counts = {row.keyword: row.count for row in context.jobs.keyword_counts()}
+    deduped = Counter(row.keyword for row in load_rows(context.db, settings))
 
     print(f"{'关键词':<16}{'入库':>6}{'有效JD':>8}{'占比':>7}  赛道      备注")
     print("-" * 78)

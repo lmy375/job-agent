@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
+
+from pydantic import BaseModel, ConfigDict
 
 from job_agent.config import Settings, load_settings
 from job_agent.core.liepin import LiepinClient
@@ -23,8 +24,10 @@ from job_agent.log import get_logger, setup_logging
 logger = get_logger(__name__)
 
 
-@dataclass(slots=True)
-class AppContext:
+class AppContext(BaseModel):
+    # 装的是数据库句柄与仓储，都不是 pydantic 类型，所以要放行任意类型
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
     settings: Settings
     db: Database
     jobs: JobRepository
@@ -34,12 +37,13 @@ class AppContext:
     @classmethod
     def create(
         cls,
+        profile: str | None = None,
         config_file: Path | None = None,
         log_level: str | None = None,
         console_level: str | None = None,
         configure_logging: bool = True,
     ) -> AppContext:
-        settings = load_settings(config_file)
+        settings = load_settings(profile, config_file)
         if configure_logging:
             setup_logging(
                 level=log_level or settings.logging.level,
@@ -47,7 +51,12 @@ class AppContext:
                 console_level=log_level or console_level,
                 force=True,
             )
-        logger.debug("配置来源：%s", settings.config_file or "（内置默认值）")
+        logger.debug(
+            "profile=%s 配置来源：%s + %s",
+            settings.profile_name,
+            settings.config_file or "（内置默认值）",
+            settings.profile_file or "（profile.toml 缺失，全用默认值）",
+        )
         return cls.from_settings(settings)
 
     @classmethod

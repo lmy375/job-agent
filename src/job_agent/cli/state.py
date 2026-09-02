@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import typer
+from pydantic import BaseModel, ConfigDict, PrivateAttr
 
 from job_agent.context import AppContext
 from job_agent.core.services import ProgressEvent
@@ -19,19 +19,23 @@ _COLORS = {"info": None, "warn": typer.colors.YELLOW, "error": typer.colors.RED}
 _ICONS = {"info": "·", "warn": "!", "error": "×"}
 
 
-@dataclass
-class CliState:
+class CliState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str | None = None
     config_file: Path | None = None
     log_level: str | None = None
     quiet: bool = False
-    _context: AppContext | None = field(default=None, repr=False)
+    #: 惰性构造的上下文。PrivateAttr 而不是字段：它不是命令行传进来的状态，
+    #: 也不该出现在 repr / model_dump 里
+    _context: AppContext | None = PrivateAttr(default=None)
 
     def context(self) -> AppContext:
         """惰性构造上下文，同一次命令内复用。"""
         if self._context is None:
             # 终端默认只显示 WARNING：INFO 级进度已经由命令本身打印了
             self._context = AppContext.create(
-                self.config_file, self.log_level, console_level="WARNING"
+                self.profile, self.config_file, self.log_level, console_level="WARNING"
             )
         return self._context
 

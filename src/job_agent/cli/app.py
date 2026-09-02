@@ -6,6 +6,7 @@
     job report                 生成 HTML 市场分析报告
     job stats                  在终端看一眼库里现在有什么
     job web                    启动 Web 管理服务
+    job reset                  删库重建（结构变了就重来，不做迁移）
     job config init|show|path  管理配置
     job db info|vacuum         数据库维护
 """
@@ -60,9 +61,17 @@ def _version_callback(value: bool) -> None:
 @app.callback()
 def main_callback(
     ctx: typer.Context,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            "-p",
+            help="用哪个 profile（profiles/ 下的目录名）。默认取 [profiles].default。",
+        ),
+    ] = None,
     config: Annotated[
         Path | None,
-        typer.Option("--config", "-c", help="配置文件路径，默认 config/config.toml。"),
+        typer.Option("--config", "-c", help="全局配置文件路径，默认 config/config.toml。"),
     ] = None,
     log_level: Annotated[
         str | None,
@@ -76,7 +85,9 @@ def main_callback(
     ] = False,
 ) -> None:
     """全局选项。子命令通过 ``ctx.obj`` 拿到状态。"""
-    ctx.obj = CliState(config_file=config, log_level=log_level, quiet=quiet)
+    ctx.obj = CliState(
+        profile=profile, config_file=config, log_level=log_level, quiet=quiet
+    )
     ctx.call_on_close(ctx.obj.close)
 
 

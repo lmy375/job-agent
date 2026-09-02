@@ -16,14 +16,20 @@
 >   匹配信号表。**换一个用户，只应该换 `config/`，不该改代码。**
 >
 > 判断一个新功能该不该加、加在哪，就用这三条对照：
-> 结论必须稳定复现的 → CLI；需要读懂文字才能下判断的 → skill；随人而变的 → config。
+> 结论必须稳定复现的 → CLI；需要读懂文字才能下判断的 → skill；随人而变的 → profile。
 
 猎聘职位工具链：批量搜索 → 抓取详情页 JD → 赛道 / 技能统计 → 生成 HTML 市场报告 → 投递，
-数据全部落在本地 SQLite。提供 **CLI** 与 **Web 管理台**两套入口，配置与个人资料全部在 `config/`。
+数据全部落在本地 SQLite。提供 **CLI** 与 **Web 管理台**两套入口。
+
+运行按 **profile** 隔离：**一个 profile = 一个人，或者一种求职场景**
+（「AI 应用工程」和「Web3 安全」可以是两个 profile）。每个 profile 是一个自包含的目录，
+简历、关键词、信号表、数据库、产物全在里面，`profiles/a` 与 `profiles/b` 互不可见；
+跟人无关的东西（猎聘账号密钥、模型接入点、限速、Web 端口）仍然全局共享一份。
 
 ```bash
 uv sync --extra dev          # 安装依赖
-uv run job config init       # 从模板生成 config/ 下缺失的文件
+uv run job config init       # 生成全局配置 config/config.toml（密钥填这里）
+uv run job profile new me    # 建一个 profile（简历、关键词、数据库都在它自己的目录里）
 uv run job search            # 采集职位
 uv run job detail            # 抓 JD
 uv run job match             # 按信号表给职位打分排序（分诊）
@@ -32,14 +38,24 @@ uv run job report            # 出报告
 uv run job web               # 打开 Web 管理台
 ```
 
+有多个 profile 时，每条命令都能用 `-p <名字>` 指定；不带就用默认的那个：
+
+```bash
+uv run job profile list      # 有哪些 profile、哪个是默认、各自多少条数据
+uv run job profile new web3  # 再开一条线
+uv run job -p web3 search    # 只往 web3 这个 profile 的库里写
+uv run job profile use web3  # 把它设成默认，之后不用每次带 -p
+```
+
 配置怎么填？**在 Claude Code 里跑 `/job-init`**，它会问你需要的信息并写进对应位置
 （token、城市与薪资门槛、关键词分组、简历、求职偏好、匹配信号表）。想手填就照
-`config/` 下各文件的注释改，填完 `uv run job config validate` 自检。
+两份配置文件里的注释改，填完 `uv run job config validate` 自检。
 
 采完数据之后**跑 `/job-match`**：它读 JD、比硬门槛、排投递优先级、写投递口径，
 把 `job shortlist` 留白的判断部分填掉。完整流程：
 
 ```
+job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
 job search → job detail → job match → job shortlist → /job-match → job apply
                        ↘ job report / job web （看市场大盘）
 ```
@@ -47,17 +63,20 @@ job search → job detail → job match → job shortlist → /job-match → job
 ## 目录结构
 
 ```
-config/                用户自己的东西（配置、token、简历、报告文案），不进版本库
-  config.example.toml  配置模板（进版本库）
-  config.toml          你的配置
-  .env                 猎聘 token
-  resume.md            你的简历
-  preferences.md       求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
-  match.toml           匹配信号表：正负信号 + 权重（决定 job match 的排序）
-  *.example.*          上面每份文件的模板（进版本库）
-  insights/            报告里的定性结论（HTML 片段 + 匹配矩阵）
+config/                跟人无关的那一半
+  config.example.toml  全局配置模板（进版本库）
+  config.toml          全局配置：猎聘账号密钥、模型接入点、限速、Web、日志（不进版本库）
+  templates/           新建 profile 的模板，整份拷成一个新 profile（进版本库）
+profiles/              随人而变的那一半，整个目录不进版本库
+  <名字>/               一个 profile = 一个人 / 一种求职场景，自包含
+    profile.toml       搜索条件、关键词分组、匹配门槛、报告
+    resume.md          你的简历
+    preferences.md     求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
+    match.toml         匹配信号表：正负信号 + 权重（决定 job match 的排序）
+    insights/          报告里的定性结论（HTML 片段 + 匹配矩阵）
+    data/              jobs.db、shortlist.md、job-report.html、agent-plan.md
 src/job_agent/
-  config/              配置加载与校验（TOML + .env → 校验过的 Settings）
+  config/              配置加载与校验（TOML → 校验过的 Settings，密钥是 SecretStr）
   core/                核心能力，不依赖 CLI / Web
     liepin/            猎聘接口客户端（限速、错误码翻译、请求模型）
     storage/           SQLite：ORM 模型、仓储、轻量迁移
@@ -68,8 +87,9 @@ src/job_agent/
     report/            HTML 报告渲染 + insights 素材加载
     jd_parser.py       详情页 → 结构化 JD（纯函数）
     salary.py          薪资文本 → 年薪区间（万元，税前）
-  cli/                 typer 子命令
+  cli/                 typer 子命令（执行路线一：人或 skill 驱动）
   web/                 FastAPI 管理后端 + 后台任务
+  agent/               LangGraph 独立执行（执行路线二，装 --extra agent 才可用）
 frontend/              React（Vite）管理台，构建到 frontend/dist 由后端托管
 scripts/               一次性分析脚本（改分类规则时用来核对）
 tests/                 pytest（不碰真实库、不发网络请求）
@@ -80,22 +100,46 @@ data/                  jobs.db、生成的报告
   job-match/           `/job-match`：读 JD、比硬门槛、排投递优先级、写投递口径
 ```
 
-依赖方向单向：`cli` / `web` → `core` → `config`。反向依赖一律禁止。
+依赖方向单向：`cli` / `web` → `core` → `config`，`agent` → `core` → `config`。
+反向依赖一律禁止；两条执行路线（`cli`+`web` 与 `agent`）互不 import，
+共享的确定性内核只有 `core/` 与 `config/`（`tests/test_boundaries.py` 强制这条边界）。
 
 ## 配置
 
-所有个人化的东西都在 `config/`，代码里不硬编码任何个人信息。
+所有个人化的东西都在 profile 目录里，代码里不硬编码任何个人信息。
+配置**只有两个文件，段名完全不重叠**——放错了会当场报错并告诉你该放哪：
 
-- `config/config.toml`：搜索条件、关键词分组、限速、路径、Web 端口、日志级别。
-  每一项都有注释，见 `config/config.example.toml`。
-- `config/.env`：`LIEPIN_USER_TOKEN`（前往 <https://www.liepin.com/mcp/auth> 生成）。
-- `config/resume.md`、`config/preferences.md`：你的简历与求职偏好。程序不解析它们，
+| 文件 | 管什么 | 段 |
+| --- | --- | --- |
+| `config/config.toml` | **怎么连**，跟人无关，全局一份 | `[profiles]`、`[liepin]`、`[detail]`、`[agent]`、`[web]`、`[logging]` |
+| `profiles/<名>/profile.toml` | **找什么**，随人而变，一个 profile 一份 | `[profile]`、`[search]`、`[storage]`、`[match]`、`[report]` |
+
+- `config/config.toml`：全部密钥都在这（猎聘 token、模型 API key、LangSmith key）。
+  它不进版本库，所以密钥直接填在里面；每一项都有注释，见 `config/config.example.toml`。
+  猎聘 token 填在 `[liepin.accounts.<账号名>].user_token`，前往
+  <https://www.liepin.com/mcp/auth> 生成。可以同时放几个人的账号，
+  profile 用 `[profile].account` 指一个——换人不用来回重贴 token。
+- `profiles/<名>/profile.toml`：搜索条件、关键词分组、匹配门槛、报告输出。
+  里面的相对路径都相对于**这个 profile 的目录**，所以两个 profile 的
+  `data/jobs.db` 是两个库。
+- `profiles/<名>/resume.md`、`preferences.md`：你的简历与求职偏好。程序不解析它们，
   刻意保持自由格式 Markdown——它们是写报告「给我的建议」章节、挑岗位、
-  准备面试问答时的输入。`/job-init` 会带你写；模板见同目录的 `*.example.md`。
-- `config/insights/`：报告里的文字结论，`job config init` 会从 `insights.example/`
-  生成一份模板。素材缺失不会让报告失败——定量部分照样出，只是少了文字解读。
-- 环境变量可覆盖：`JOB_AGENT_CONFIG`、`JOB_AGENT_HOME`、`JOB_AGENT_DB`、
-  `JOB_AGENT_LOG_LEVEL`、`JOB_AGENT_WEB_HOST/PORT`、`LIEPIN_*`。
+  准备面试问答时的输入。`/job-init` 会带你写；模板见 `config/templates/`。
+- `profiles/<名>/insights/`：报告里的文字结论，`job profile new` 会带一份模板过来。
+  素材缺失不会让报告失败——定量部分照样出，只是少了文字解读。
+- 用哪个 profile：`--profile` → `JOB_AGENT_PROFILE_NAME` → `[profiles].default`
+  → 只有一个 profile 时就是它 → 报错列出候选。有两个及以上又没说用哪个时**绝不猜**。
+  （环境变量刻意不叫 `JOB_AGENT_PROFILE`：那个名字会被 pydantic-settings
+  当成给 `[profile]` 整段赋 JSON 值。）
+- 环境变量可覆盖：`JOB_AGENT_CONFIG` / `JOB_AGENT_HOME` 指定全局配置文件与项目根；
+  任意配置项可用 `JOB_AGENT_<节>__<字段>` 覆盖（如 `JOB_AGENT_WEB__PORT=19999`、
+  `JOB_AGENT_SEARCH__ADDRESS=上海`），**密钥也不例外**
+  （`JOB_AGENT_LIEPIN__ACCOUNTS__DEFAULT__USER_TOKEN=…`、
+  `JOB_AGENT_AGENT__PROVIDERS__DEEPSEEK__API_KEY=…`），适合不想落盘的场景。
+  两个文件的段不重叠，所以一个变量只可能落到其中一边，没有歧义。
+  分层由 pydantic-settings 完成：环境变量 > TOML。
+- 密钥字段的类型是 `SecretStr`：`job config show --json` 与 Web 的 `/api/config`
+  返回的是 `**********`。防泄漏靠类型，而不是靠「记得在某处补一段脱敏逻辑」。
 
 配置项**拼错会直接报错**（`extra="forbid"`），不会被静默忽略——
 静默忽略是配置系统最容易埋的坑（把 `salary_floor` 写成 `salaryFloor`，
@@ -109,11 +153,11 @@ data/                  jobs.db、生成的报告
 ## 初始化：`/job-init`
 
 `.claude/skills/job-init/` 是一个 Claude Code skill。在仓库里对 Claude 说
-`/job-init`（或「帮我初始化 job-agent」），它会按 **token → 搜索条件 → 简历 → 求职偏好**
-四步访谈，把答案写进 `config/` 对应文件，最后跑 `job config validate` 与
-`job search --dry-run` 自检。
+`/job-init`（或「帮我初始化 job-agent」），它会先确认用哪个 profile（没有就建一个），
+再按 **token → 搜索条件 → 简历 → 求职偏好**四步访谈，把答案写进对应文件，
+最后跑 `job config validate` 与 `job search --dry-run` 自检。
 
-几个刻意的设计：token 只写进 `config/.env`、不回显、不进对话；已有文件先读再改，
+几个刻意的设计：token 只写进全局 `config/config.toml`、不回显、不进对话；已有文件先读再改，
 不整份重写；简历支持粘贴 / 指向已有文件（PDF 自动转文本）/ 从零访谈三种来源；
 问到绩效、婚育这类敏感项会先说明「只存本地、不进版本库」，不答就留空。
 
@@ -129,11 +173,17 @@ job apply <jobId>... [--job-kind 1|2] [--yes]
 job report [-o 输出路径] [--no-dedupe]
 job stats [--tracks]
 job web [--host H] [--port P] [--no-browser] [--skip-build]
-job config init|show|path|validate
-job db info|migrate|vacuum
+job profile list|new|use|path
+job config init|show|path [--json]|validate
+job reset [--yes]
+job db info|vacuum
 ```
 
-全局选项：`--config` 指定配置文件、`--log-level`、`--quiet`、`--version`。
+全局选项：`--profile/-p` 指定 profile、`--config` 指定全局配置文件、
+`--log-level`、`--quiet`、`--version`。
+
+`job config path --json` 打印当前 profile 解析好的全部路径（简历、信号表、数据库…），
+skill 与外部脚本靠它定位文件——路径随 profile 变，不该在别处硬编码。
 
 退出码：`2` 配置/鉴权问题、`3` 存储、`4` 报告、`5` 接口错误或简历抽取失败、`6` 触发限流。
 脚本里可以据此判断「今天别再投了」。
@@ -149,10 +199,10 @@ job db info|migrate|vacuum
 ```bash
 uv run job match --top 30 --why       # 打分排序，--why 展开命中与扣分理由
 uv run job match --json               # 给脚本用
-uv run job shortlist --limit 12       # 写出 data/shortlist.md（判断部分留白）
+uv run job shortlist --limit 12       # 写出 <profile>/data/shortlist.md（判断部分留白）
 ```
 
-`job match` 的排序来自 `config/match.toml` 的信号表，**它是配置不是代码**——
+`job match` 的排序来自当前 profile 的 `match.toml` 信号表，**它是配置不是代码**——
 编码的是「你想要什么」，换个人应当整份重写：
 
 ```toml
@@ -186,6 +236,91 @@ pattern = '预训练|后训练|强化学习|模型训练'
 **硬门槛核对**、**投不投**、**投递口径**。代码刻意不填——填了模板话术，
 人会以为已经分析过了，比留空更糟。
 
+## 无人值守：`job-agent`（LangGraph 路线）
+
+`/job-match` 是交互式的：你和 Claude 一起读 JD、改口径。`job-agent` 是同一条流程的
+无人值守版——LangGraph 组的固定管线，一条命令跑完 **分诊 → 逐岗审读 → 投递计划**，
+共享同一个数据库、同一份 `config/`：
+
+```bash
+uv sync --extra agent                 # 依赖是可选的，不装不影响 job / job web
+# config/config.toml 的 [agent.providers.*] 里填 api_key（审读节点要调模型 API）
+
+uv run job-agent                      # 用库内已有数据：分诊 → 审读 → <profile>/data/agent-plan.md
+uv run job-agent --collect            # 先采集（search + detail）再走上面的流程
+uv run job-agent --apply              # 出完计划后进入投递确认（终端里逐条拍板）
+uv run job-agent --thread run-x       # 中断后用同一 thread 从 checkpoint 续跑
+uv run job-agent --provider deepseek  # 换模型：用 [agent.providers.deepseek]
+```
+
+### 审读用哪家模型
+
+模型是**配置**，不是代码。一张 `[agent.providers.*]` 表就是一个接入点，
+`[agent].provider`（或 `--provider`）指哪个用哪个；几家的 key 长期并存，
+换模型不用来回粘贴密钥：
+
+```toml
+[agent]
+provider = "deepseek"
+
+[agent.providers.anthropic]
+api = "anthropic"                     # Claude 原生协议
+model = "claude-opus-5"
+api_key = "sk-ant-…"
+
+[agent.providers.deepseek]
+api = "openai"                        # DeepSeek 兼容 OpenAI 协议
+model = "deepseek-chat"
+api_key = "sk-…"
+base_url = "https://api.deepseek.com/v1"
+structured_output = "function_calling"
+```
+
+客户端只有两类：`api = "anthropic"` 和 `api = "openai"`。ChatGPT、DeepSeek、
+Kimi、通义、GLM、OpenRouter、自建网关（LiteLLM、one-api）、本地 vLLM/Ollama
+全都兼容 OpenAI 协议，区别只是
+`base_url`——加一家新模型是抄一段配置，不用改代码。密钥不想落盘就用
+`JOB_AGENT_AGENT__PROVIDERS__<表名大写>__API_KEY` 覆盖。
+
+走 OpenRouter 这类网关时，`model` 填网关的 slug：
+
+```toml
+[agent.providers.openrouter]
+api = "openai"
+model = "z-ai/glm-5.2:free"           # 或 anthropic/claude-sonnet-5、deepseek/deepseek-chat
+api_key = "sk-or-v1-…"
+base_url = "https://openrouter.ai/api/v1"
+structured_output = "function_calling"
+```
+
+带 `:free` 后缀的 slug 不花钱，代价是每日调用上限，跑之前用 `--top` 控量。
+另有一个特例 `openrouter/free`，它是**免费模型路由器**：每次调用从当前可用的
+免费模型里随机挑一个，更省事，但同一批岗位可能由不同模型判、快慢差别很大，
+裁决口径不可比——想要可比的结论就填具体 slug。
+
+**唯一要留意的坑是 `structured_output`。** 审读裁决必须是固定 schema 的 JSON
+（`JDVerdict`），而各家实现方式不同：官方端点留 `"auto"`，让 langchain 自己选
+（Claude 走 tool calling、OpenAI 走 strict json_schema）；兼容端点如果报
+「不支持 json_schema / response_format」，依次试 `"function_calling"` 和
+`"json_mode"`——`json_mode` 下 langchain 不会把 schema 发出去，由 prompt 带过去。
+
+几条设计约束（和 CLAUDE.md 的表一致）：
+
+- **LLM 只出现在审读节点**（读 JD 比硬门槛、写投递口径，产出固定 schema 的裁决）。
+  采集、去重、打分、排序、计划渲染全部是共享内核里的确定性代码——
+  `job match` 和 `job-agent` 对同一份数据给出同一个 shortlist。
+- **投递前必经 interrupt。** `--apply` 只是打开闸门，真正投哪几个要在终端里
+  逐条确认；不传 `--apply` 时流程在写出计划后就结束。
+- **换了模型，产出看得出来**：模型标识（`provider / model`）写进投递计划头部，
+  也进 checkpoint。裁决口径随模型变，事后回看才分得清「优先级变了」是 JD 变了
+  还是换了模型。
+- 每一步 checkpoint 到 `<profile>/data/agent-checkpoint.db`，中断续跑、事后回放
+  「当时为什么这么排」都靠它。
+- **LangSmith 追踪（可选）**：`config/config.toml` 的 `[agent.langsmith]` 下填
+  `api_key` 即启用（`project` 决定归到哪个 project，自托管再填 `endpoint`），
+  每次运行的全部 LLM 调用按 `thread_id` 归成一条 thread；留空则完全不上报。
+  追踪是 langchain-core 内建的，靠环境变量开关，不需要挂 callback handler。
+
 ## 导入简历：`job resume import`
 
 ```bash
@@ -196,7 +331,7 @@ uv run job resume import 简历.docx -o /tmp/resume.txt
 支持 `.pdf`（pypdf）、`.docx`（直接解 zip 里的 XML，不引 lxml）、`.md` / `.txt`。
 `.doc` 不支持，另存为 `.docx` 或导出 PDF。
 
-**它只抽纯文本，不写 `config/resume.md`**——抽出来的是没有结构的文字，
+**它只抽纯文本，不写 profile 里的 `resume.md`**——抽出来的是没有结构的文字，
 直接覆盖会把排版和数字弄丢。整理成结构化 Markdown 是 `/job-init` 的工作：
 它会保留全部事实与数字、对齐市场词汇、缺信息时留 `<待补>`。
 （真要覆盖得加 `--force`，命令会先拦你一次。）
@@ -277,8 +412,13 @@ make test
 uv run pytest tests/test_classify.py -v
 ```
 
-测试不碰真实的 `data/jobs.db`，也不发任何网络请求：每个用例在临时目录里搭一套
+测试不碰真实的 `jobs.db`，也不发任何网络请求：每个用例在临时目录里搭一套
 完整的 `config/` + `data/`，顺便验证了「换一个项目根目录也能跑」。
 
-数据库升级由 `core/storage/migrations.py` 处理（加列 + 回填，幂等），
-`job db migrate` 可手动触发。
+**数据库不做迁移，接口不做向后兼容**（见 CLAUDE.md 硬规则）：库结构改了就
+`job reset` 删库重建，再 `job search` + `job detail` 重采一遍；接口字段改了就同步改
+`frontend/`。这是个单人工具，数据随时能重新采集，为「万一有老库」写的兼容代码
+只会一直留在仓库里没人敢删。
+
+`job reset` 会把投递记录一并删掉——猎聘没有查询投递记录的接口，那张表是唯一的账本，
+所以它默认要确认一次。

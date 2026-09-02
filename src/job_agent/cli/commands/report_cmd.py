@@ -30,7 +30,7 @@ def report(
 
     typer.echo("正在统计……")
     data = analyze(context.db, context.settings, dedupe=not no_dedupe)
-    if not data["total"]:
+    if not data.total:
         echo_warn("没有可用的 JD，请先执行 job search 与 job detail。")
         raise typer.Exit(code=1)
 
@@ -39,4 +39,4 @@ def report(
         echo_warn(warning)
 
     path = build(data, context.settings, output=output, insights=insights)
-    echo_ok(f"报告已生成（{data['total']} 份有效 JD）：{path}")
+    echo_ok(f"报告已生成（{data.total} 份有效 JD）：{path}")

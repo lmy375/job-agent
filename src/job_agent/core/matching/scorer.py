@@ -10,11 +10,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any
+from pydantic import BaseModel, ConfigDict, Field
 
 from job_agent.config import Settings
-from job_agent.core.analysis import load_rows
+from job_agent.core.analysis import AnalysisRow, load_rows
 from job_agent.core.matching.rules import MatchRules
 from job_agent.core.storage import Database
 from job_agent.log import get_logger
@@ -22,9 +21,10 @@ from job_agent.log import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass(slots=True)
-class Hit:
+class Hit(BaseModel):
     """一条命中的信号。``in_title`` 决定权重是否被 ``title_multiplier`` 放大。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     weight: float
@@ -34,37 +34,38 @@ class Hit:
         return f"{self.name}（标题）" if self.in_title else self.name
 
 
-@dataclass(slots=True)
-class ScoredJob:
-    """一条打完分的职位。``row`` 是 :func:`load_rows` 的原始行，字段见那边。"""
+class ScoredJob(BaseModel):
+    """一条打完分的职位。``row`` 是 :func:`load_rows` 的原始行，字段见 :class:`AnalysisRow`。"""
 
-    row: dict[str, Any]
+    model_config = ConfigDict(extra="forbid")
+
+    row: AnalysisRow
     score: float
-    hits: list[Hit] = field(default_factory=list)
-    penalties: list[Hit] = field(default_factory=list)
+    hits: list[Hit] = Field(default_factory=list)
+    penalties: list[Hit] = Field(default_factory=list)
     #: 职位名与 JD 都没命中 require.pattern
     off_track: bool = False
 
     # 常用字段的直通访问，省得调用方到处写 job.row["..."]
     @property
     def job_id(self) -> int:
-        return int(self.row["jobId"])
+        return self.row.jobId
 
     @property
     def title(self) -> str:
-        return str(self.row["jobName"])
+        return self.row.jobName
 
     @property
     def company(self) -> str:
-        return str(self.row["company"])
+        return self.row.company
 
     @property
     def salary_low(self) -> float | None:
-        return self.row.get("salaryLow")
+        return self.row.salaryLow
 
     @property
     def salary_high(self) -> float | None:
-        return self.row.get("salaryHigh")
+        return self.row.salaryHigh
 
     def reasons(self) -> str:
         return "、".join(h.label() for h in self.hits)
@@ -73,13 +74,10 @@ class ScoredJob:
         return "、".join(h.label() for h in self.penalties)
 
 
-def score_row(row: dict[str, Any], rules: MatchRules) -> ScoredJob:
+def score_row(row: AnalysisRow, rules: MatchRules) -> ScoredJob:
     """给一行打分。同一条信号在标题和正文都命中时只算标题（取高的那份）。"""
-    title = row.get("jobName") or ""
-    body = " ".join(
-        str(row.get(key) or "")
-        for key in ("description", "responsibilities", "requirements")
-    )
+    title = row.jobName
+    body = " ".join((row.description, row.responsibilities, row.requirements))
     haystack = f"{title}\n{body}"
 
     scored = ScoredJob(row=row, score=0.0)
@@ -124,7 +122,7 @@ def rank(
     out: list[ScoredJob] = []
     skipped = 0
     for row in rows:
-        high = row.get("salaryHigh")
+        high = row.salaryHigh
         if threshold is not None and (high is None or high < threshold):
             skipped += 1
             continue

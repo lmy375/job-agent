@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from job_agent.config import Settings
 from job_agent.core.liepin import (
@@ -22,8 +23,9 @@ from job_agent.log import get_logger
 logger = get_logger(__name__)
 
 
-@dataclass(slots=True)
-class KeywordResult:
+class KeywordResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     keyword: str
     found: int = 0
     new: int = 0
@@ -33,10 +35,11 @@ class KeywordResult:
     error: str | None = None
 
 
-@dataclass(slots=True)
-class SearchSummary:
-    results: list[KeywordResult] = field(default_factory=list)
-    remaining: list[str] = field(default_factory=list)
+class SearchSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    results: list[KeywordResult] = Field(default_factory=list)
+    remaining: list[str] = Field(default_factory=list)
     #: 非空表示整批被中止（目前只有触发限流一种原因）
     aborted_reason: str | None = None
 

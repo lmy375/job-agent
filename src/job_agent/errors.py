@@ -21,16 +21,29 @@ class ConfigError(JobAgentError):
 
 
 class MissingTokenError(ConfigError):
-    """没有配置猎聘 token，无法访问任何远端接口。"""
+    """当前 profile 用的猎聘账号没有 token，无法访问任何远端接口。"""
 
     exit_code = 2
 
     def __init__(self, message: str | None = None) -> None:
         super().__init__(
             message
-            or "缺少猎聘 token：请在 config/.env 里填写 LIEPIN_USER_TOKEN，"
-            "或设置同名环境变量。token 前往 https://www.liepin.com/mcp/auth 生成。"
+            or "缺少猎聘 token：请在 config/config.toml 的 "
+            "[liepin.accounts.<账号名>] 下填写 user_token，"
+            "并确认当前 profile 的 [profile].account 指的就是它"
+            "（跑 job config path 看当前用的是哪个 profile）。"
+            "token 前往 https://www.liepin.com/mcp/auth 生成。"
         )
+
+
+class ProfileNotFoundError(ConfigError):
+    """指定的 profile 不存在，或者有多个 profile 但没说用哪个。
+
+    一个 profile = 一个用户或一种求职场景。有歧义时绝不猜：
+    猜错了就是往别人的库里写数据。
+    """
+
+    exit_code = 2
 
 
 class StorageError(JobAgentError):
@@ -40,6 +53,6 @@ class StorageError(JobAgentError):
 
 
 class ReportError(JobAgentError):
-    """报告渲染失败，通常是 config/insights 下的素材缺失。"""
+    """报告渲染失败，通常是 profile 的 insights/ 下的素材缺失。"""
 
     exit_code = 4

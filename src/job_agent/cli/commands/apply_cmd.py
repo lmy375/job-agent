@@ -44,7 +44,7 @@ def apply(
     typer.echo(f"准备投递 {len(job_ids)} 个职位：")
     for job_id in job_ids:
         job = context.jobs.get(job_id)
-        label = f"{job['jobName']} @ {job['company']}（{job['salary']}）" if job else "不在数据库中"
+        label = f"{job.jobName} @ {job.company}（{job.salary}）" if job else "不在数据库中"
         typer.echo(f"  · {job_id}  {label}")
     if not yes:
         typer.confirm("确认投递？", abort=True)

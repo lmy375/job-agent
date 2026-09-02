@@ -41,7 +41,7 @@ class LiepinAuthError(LiepinError):
         super().__init__(
             message
             or f"token 无效或已过期，请前往 {TOKEN_HELP_URL} 重新生成，"
-            "并更新 config/.env 里的 LIEPIN_USER_TOKEN"
+            "并更新 config/config.toml 里 [liepin] 的 user_token"
         )
 
 

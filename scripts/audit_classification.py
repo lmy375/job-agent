@@ -18,7 +18,7 @@ import argparse
 from collections import defaultdict
 
 from job_agent.context import AppContext
-from job_agent.core.analysis import load_rows
+from job_agent.core.analysis import AnalysisRow, load_rows
 from job_agent.tracks import ALL_TRACKS
 
 
@@ -28,14 +28,17 @@ def main() -> None:
     parser.add_argument("--role", help="只看某个角色（子串匹配）")
     parser.add_argument("--limit", type=int, default=12, help="每个角色最多打印几条，0 为全部")
     parser.add_argument("--show-salary", action="store_true", help="同时打印薪资")
+    parser.add_argument(
+        "--profile", "-p", default=None, help="用哪个 profile（默认取 [profiles].default）"
+    )
     args = parser.parse_args()
 
-    context = AppContext.create()
+    context = AppContext.create(profile=args.profile)
     rows = load_rows(context.db, context.settings)
 
-    grouped: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    grouped: dict[tuple[str, str], list[AnalysisRow]] = defaultdict(list)
     for row in rows:
-        grouped[(row["track"], row["role"])].append(row)
+        grouped[(row.track, row.role)].append(row)
 
     for track in ALL_TRACKS:
         if args.track and track != args.track:
@@ -50,9 +53,9 @@ def main() -> None:
                 continue
             print(f"\n  ▸ {role}（{len(items)} 条）")
             shown = items if args.limit == 0 else items[: args.limit]
-            for row in sorted(shown, key=lambda r: -(r["salaryHigh"] or 0)):
-                salary = f"  {row['salary']:>16}" if args.show_salary else ""
-                print(f"      {row['jobName'][:52]:<54}{salary}  [{row['keyword']}]")
+            for row in sorted(shown, key=lambda r: -(r.salaryHigh or 0)):
+                salary = f"  {row.salary:>16}" if args.show_salary else ""
+                print(f"      {row.jobName[:52]:<54}{salary}  [{row.keyword}]")
             if args.limit and len(items) > args.limit:
                 print(f"      …… 还有 {len(items) - args.limit} 条（--limit 0 看全部）")
 

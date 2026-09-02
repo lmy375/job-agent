@@ -1,10 +1,9 @@
 # 用户自己的东西
+# 全局配置（含密钥）不进版本库；config/templates/ 与 config.example.toml 进
 config/config.toml
-config/.env
-config/resume.md
-config/preferences.md
-config/match.toml
-config/insights/
+# 每个 profile 都是一个人 / 一种求职场景的全部家当：
+# 简历、求职偏好、信号表、数据库、产物。整个目录不进版本库
+/profiles/
 
 # 数据与产物
 data/
@@ -29,3 +28,6 @@ build/
 # 前端
 frontend/node_modules/
 frontend/dist/
+
+# 锁文件不进版本库（用户要求：本机各自 uv sync）
+uv.lock

@@ -3,16 +3,27 @@
 from __future__ import annotations
 
 from job_agent.core.analysis.classify import YEARS_ORDER, classify, norm_years
-from job_agent.core.analysis.dataset import jd_key, load_rows
+from job_agent.core.analysis.dataset import AnalysisRow, jd_key, load_rows
 from job_agent.core.analysis.rules import ROLE_RULES, TRACK_SIGNALS, signal_count
 from job_agent.core.analysis.skills import SKILLS, skill_hits
-from job_agent.core.analysis.stats import analyze, analyze_rows, quantile
+from job_agent.core.analysis.stats import (
+    Analysis,
+    SkillStat,
+    TrackStats,
+    analyze,
+    analyze_rows,
+    quantile,
+)
 
 __all__ = [
     "ROLE_RULES",
     "SKILLS",
     "TRACK_SIGNALS",
     "YEARS_ORDER",
+    "Analysis",
+    "AnalysisRow",
+    "SkillStat",
+    "TrackStats",
     "analyze",
     "analyze_rows",
     "classify",

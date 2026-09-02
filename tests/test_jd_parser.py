@@ -9,13 +9,13 @@ from job_agent.core.jd_parser import parse_detail, split_jd
 def test_parse_ld_json():
     detail = parse_detail(ld_json_page())
     assert detail is not None
-    assert detail["title"] == "AI Agent 工程师"
-    assert detail["companyName"] == "某公司"
-    assert detail["industry"] == "计算机软件"
-    assert detail["experienceRequirements"] == "5-10年"
-    assert detail["streetAddress"] == "海淀区"
-    assert "Agent 平台建设" in detail["responsibilities"]
-    assert "Python" in detail["requirements"]
+    assert detail.title == "AI Agent 工程师"
+    assert detail.companyName == "某公司"
+    assert detail.industry == "计算机软件"
+    assert detail.experienceRequirements == "5-10年"
+    assert detail.streetAddress == "海淀区"
+    assert "Agent 平台建设" in detail.responsibilities
+    assert "Python" in detail.requirements
 
 
 def test_parse_tolerates_raw_newlines_in_json():
@@ -27,7 +27,7 @@ def test_parse_tolerates_raw_newlines_in_json():
     )
     detail = parse_detail(html)
     assert detail is not None
-    assert "第二行" in detail["description"]
+    assert "第二行" in detail.description
 
 
 def test_parse_skips_non_jobposting_blocks():
@@ -37,15 +37,15 @@ def test_parse_skips_non_jobposting_blocks():
     )
     detail = parse_detail(html)
     assert detail is not None
-    assert detail["title"] == "真正的职位"
+    assert detail.title == "真正的职位"
 
 
 def test_fallback_to_job_intro_node():
     html = '<dd data-selector="job-intro-content"><p>岗位职责：写代码</p></dd>'
     detail = parse_detail(html)
     assert detail is not None
-    assert detail["description"] == "岗位职责：写代码"
-    assert detail["title"] == ""
+    assert detail.description == "岗位职责：写代码"
+    assert detail.title == ""
 
 
 def test_parse_returns_none_when_page_has_nothing():

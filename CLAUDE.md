@@ -11,11 +11,11 @@
 | --- | --- | --- |
 | 结论必须可重跑、可测试、两次一样 | **CLI**（`src/job_agent/`） | 采集、限流退避、去重、JD 解析、薪资换算、规则打分、排序、报告 |
 | 需要读懂文字才能下判断 | **Skill**（`.claude/skills/`） | 读 JD 比硬门槛、简历措辞体检、排投递优先级、写面试口径 |
-| 随人而变 | **Config**（`config/`） | 简历、求职偏好、搜索关键词、匹配信号表 |
+| 随人而变 | **Profile**（`profiles/<名字>/`） | 简历、求职偏好、搜索关键词、匹配信号表 |
 
 推论，违反了就是设计错误：
 
-- **换一个用户，只应该换 `config/`，不该改代码。** 任何「AI Agent 是好岗位」
+- **换一个用户，只应该换一个 profile，不该改代码。** 任何「AI Agent 是好岗位」
   这类个人取向，一旦出现在 `src/` 里就是 bug——它属于配置。
 - **不要把判断写成代码。** 「这个岗要 50 人管理经验而候选人带 5 人」是判断，
   归 skill；「按薪资上限降序排」是规则，归 CLI。
@@ -35,12 +35,108 @@ CLI 把稳定的骨架固化下来，skill 把「怎么判断」的经验固化�
 判断新需求时的反问：**这件事下次还要做吗？做的时候希望结果和这次可比吗？**
 两个都是「是」→ 进 CLI 或 skill，不要写一次性脚本。
 
+## 两条执行路线
+
+| 路线 | 入口 | 适用 |
+| --- | --- | --- |
+| skill + Claude Code | `job …` CLI + `.claude/skills/` | 交互式：深聊、改口径、边看边判断 |
+| LangGraph 独立执行 | `job-agent`（`src/job_agent/agent/`，装 `--extra agent`） | 无人值守：一条命令跑完 采集→分诊→审读→投递计划，投递前 interrupt 等人确认 |
+
+铁律，`tests/test_boundaries.py` 会强制执行：
+
+- **两条路线代码互不依赖。** `cli/`+`web/` 与 `agent/` 谁也不 import 谁；
+  可复用的逻辑一律下沉到共享内核（`core/`、`config/`、`context.py`）。
+- **agent 路线里 LLM 只出现在判断节点**（`agent/nodes.py` 的 review：读 JD 比
+  硬门槛、写投递口径）。采集、分诊、排序、计划渲染全部复用内核或纯函数——
+  两条路线跑同一份数据得到同一个 shortlist。
+- **prompt 只写方法论**（`agent/prompts.py`）。个人取向仍然全部来自 `config/`，
+  「换用户只改 config」对两条路线同时成立。
+- **审读用哪家模型是配置，不是代码。** `[agent.providers.*]` 一张表一个接入点
+  （Claude / ChatGPT / DeepSeek / Kimi…），`[agent].provider` 指哪个用哪个。
+  客户端只有两类：`api = "anthropic"`（Claude 原生协议）与 `api = "openai"`
+  （OpenAI 协议——DeepSeek、Kimi、通义、GLM、本地 vLLM 都兼容，区别只是
+  `base_url`）。加一家新模型是抄一段配置，不许在 `src/` 里加 provider 分支。
+- **结构化输出方式也是配置**（`structured_output`）。审读裁决必须符合
+  `JDVerdict` 的 schema，而 Anthropic 走 tool calling、OpenAI 官方端点走 strict
+  json_schema、兼容端点常常只吃 `function_calling` 或 `json_mode`——支持度随版本
+  变，所以绝不按 provider 名在代码里硬猜。`json_mode` 下 langchain 不发 schema，
+  由 `prompts.review_system_message()` 把 schema 附进 prompt。
+- **换了模型，产出要能看出来。** 模型标识（`provider / model`）进 `AgentState`
+  并写进投递计划头部——裁决口径随模型变，事后回看得能分清「优先级变了」是
+  JD 变了还是换了模型。
+- agent 路线的模型 API key 与 LangSmith key（可选的运行追踪）跟猎聘 token
+  同规矩：都住 `config/config.toml`（`[agent.providers.*]` / `[agent.langsmith]`
+  / `[liepin]`）。
+
+## profile：一个人 / 一种求职场景
+
+同一台机器上要能同时跑「AI 应用工程」和「Web3 安全」两条线，或者帮另一个人跑一遍。
+所以运行按 **profile** 隔离：**一个 profile 是一个自包含的目录**，
+输入、配置、产物、数据库全在里面，`profiles/a` 与 `profiles/b` 互不可见。
+
+```
+config/
+  config.toml          # 全局：猎聘账号密钥、限速、模型接入点、Web、日志（不进版本库）
+  config.example.toml  # 全局模板
+  templates/           # 新建 profile 的模板，整份 copytree 过去
+profiles/              # 整个目录不进版本库
+  default/
+    profile.toml       # 搜索条件与关键词分组、match 门槛、report
+    resume.md  preferences.md  match.toml  insights/
+    data/              # jobs.db、shortlist.md、job-report.html、agent-plan.md
+  web3/
+    ...
+```
+
+**配置分两个文件，段名完全不重叠**：
+
+| 文件 | 段 | 一句话 |
+| --- | --- | --- |
+| `config/config.toml` | `[profiles]`、`[liepin]`（含 `[liepin.accounts.*]`）、`[detail]`、`[agent]`（含 `.providers.*` / `.langsmith`）、`[web]`、`[logging]` | 管**怎么连**，跟人无关 |
+| `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[match]`、`[report]` | 管**找什么**，随人而变 |
+
+不重叠是刻意的，也是硬约束（`tests/test_boundaries.py` 会强制）：同一个段要是能出现在
+两个文件里，下场一定是「改了一个忘了另一个」。放错文件时 `extra="forbid"` 会当场报错，
+loader 再按段名告诉你它该在哪个文件里。段不重叠还保证了环境变量覆盖没有歧义——
+`JOB_AGENT_<段>__<字段>` 只可能落到其中一边。
+
+配套的规矩：
+
+- **密钥仍然只有全局一处落盘。** 猎聘 token 住 `[liepin.accounts.<名>]`，
+  profile 用 `[profile].account` 指一个——照搬 `[agent.providers.*]` + `[agent].provider`
+  的写法：加一个账号是抄一段配置，不是改代码。几个人的 token 长期并存，换人不用重贴。
+- **profile 侧的相对路径按 profile 目录解析**，`[web]` / `[logging]` 的按项目根。
+  唯一的例外要记住：`[agent].checkpoint` 与 `plan_output` 写在全局文件里，
+  但按 **profile 目录**解析——它们是每次运行的产物，必须跟着 profile 走。
+- **定位顺序**：`--profile` → `JOB_AGENT_PROFILE_NAME` → `[profiles].default`
+  → 只有一个 profile 时就是它 → 报错列出候选。有两个及以上又没说用哪个时**绝不猜**，
+  猜错就是往别人的库里写数据。（环境变量刻意不叫 `JOB_AGENT_PROFILE`：
+  那个名字会被 pydantic-settings 当成给 `[profile]` 整段赋 JSON。）
+- **代码里不出现任何 profile 名字，也不拼 `data/jobs.db` 这类路径**——
+  一律问 `settings`。skill 与外部脚本用 `job config path --json`。
+
+```bash
+job profile list          # 有哪些 profile、哪个是默认、各自多少条数据
+job profile new web3      # 从 config/templates/ 拷一份出来
+job profile use web3      # 设为默认
+job -p web3 search        # 任何命令都能 -p 指定
+```
+
+删一个 profile 就是删它的文件夹——刻意不提供 `job profile rm`：
+那一下会连着简历和几百条采集记录一起没，交给用户自己动手更诚实。
+
 ## 端到端的流程
 
 ```
+job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
 job search → job detail → job match → job shortlist → /job-match → job apply
                        ↘ job report / job web （看市场大盘）
+
+job-agent [-p <名字>] [--collect] [--apply]   # 同一条流程的无人值守版，
+                                              # 与 CLI 共享同一个 profile 目录
 ```
+
+上面每条命令都接 `-p <名字>`；不带就是默认 profile。
 
 前四步是**确定性**的（可重跑、两次结果一样），`/job-match` 那一步是**判断**
 （读 JD 比硬门槛、排优先级、写投递口径）。这条分界线就是上面那张表的落地。
@@ -49,14 +145,16 @@ job search → job detail → job match → job shortlist → /job-match → job
 
 | 文件 | 管什么 | 谁生成 |
 | --- | --- | --- |
-| `config/config.toml` | 搜索条件、关键词分组、`[match]` 路径与薪资门槛 | `job config init` + `/job-init` |
-| `config/resume.md` | 简历（`job resume import` 抽文本，skill 整理） | `/job-init` |
-| `config/preferences.md` | 硬约束、薪资口径与底线、面试口径 | `/job-init` |
-| `config/match.toml` | **匹配信号表**——正负信号 + 权重 | `/job-init` |
+| `config/config.toml` | 猎聘账号密钥、限速、模型接入点、Web、日志 | `job config init` + `/job-init` |
+| `profiles/<名>/profile.toml` | 搜索条件、关键词分组、`[match]` 路径与薪资门槛 | `job profile new` + `/job-init` |
+| `profiles/<名>/resume.md` | 简历（`job resume import` 抽文本，skill 整理） | `/job-init` |
+| `profiles/<名>/preferences.md` | 硬约束、薪资口径与底线、面试口径 | `/job-init` |
+| `profiles/<名>/match.toml` | **匹配信号表**——正负信号 + 权重 | `/job-init` |
 
-`config/match.toml` 是「换用户只改 config」这条承诺的关键：
+`match.toml` 是「换用户只改配置」这条承诺的关键：
 它编码的是个人取向（对做应用工程的人「预训练」是 −12，对做算法的人是 +12），
-所以绝不能进 `src/`。里面的正则**一律用 TOML 字面量字符串（单引号）**——
+所以绝不能进 `src/`，而且每个 profile 各一份。里面的正则**一律用 TOML
+字面量字符串（单引号）**——
 双引号里 `\b` 是「退格符」转义，会静默变成匹配不上任何东西的正则
 （`load_rules` 会拦下来，见 `core/matching/rules.py` 的 `_check_pattern`）。
 
@@ -68,11 +166,44 @@ job search → job detail → job match → job shortlist → /job-match → job
 
 ## 硬规则
 
-- **token 只在 `config/.env`。** 不写进 `config.toml`（那是要进版本库的），
-  不回显到终端，不写进提交。
+- **配置一律走 pydantic-settings，对象一律 pydantic model，禁止裸 dict。**
+  配置的分层（环境变量 > `config/config.toml`）由 pydantic-settings 完成，
+  不自写解析逻辑（`Settings` 见 `config/models.py`）。
+  跨函数、跨层传递的结构化数据必须定义 pydantic model——裸 dict 没有 schema，
+  拼错字段静默漏过，是配置系统之外最容易埋的坑。仅有的豁免：
+  ① 框架的调用契约——LangGraph 节点返回的状态更新 mapping、
+  SQLAlchemy `insert().values()` 收的列 mapping；
+  ② 解析外部原始数据（HTTP JSON、TOML、HTML 里的 ld+json）时那一层还没有 schema 的输入。
+- **禁止 `@dataclass` 与 `NamedTuple`，一律 pydantic `BaseModel`。**
+  两套结构体写法并存，看代码的人每次都要先分辨「这个能不能校验、怎么序列化」。
+  统一到 pydantic 之后，校验、`model_dump`、FastAPI 响应模型是同一套机制。
+  持有连接、线程原语这类非 pydantic 对象时用
+  `model_config = ConfigDict(arbitrary_types_allowed=True)`，不要退回 dataclass。
+  `tests/test_boundaries.py` 会扫描并强制这条。
+- **ORM 记录转行模型只用 `model_validate`，不写 `to_row()` / `_text()` 这类手工转换。**
+  行模型开 `from_attributes=True`，仓储里直接 `JobRow.model_validate(record)`；
+  手抄一遍字段等于把字段表写两份，加列时必然漏改一处。
+  同理，字段类型就写真实类型（`datetime` 就是 `datetime`），
+  格式化是**展示层**的事，不要在模型里预先转成字符串。
+- **不做向后兼容——数据库与接口都不做。**
+  库结构变了就 `job reset` 删库重建（不写迁移、不补列、不回填、不容忍 NULL 老列）；
+  接口字段改了就同步改前端，不留兼容分支。
+  这是个单人使用的求职工具，数据随时可以重新采集，
+  为「万一有老库 / 老客户端」写的兼容代码只会一直留在仓库里没人敢删。
+- **配置只有两个文件，段名不重叠：全局 `config/config.toml`（密钥在这）+ 当前
+  profile 的 `profile.toml`。** 没有 `.env`，没有第三处落盘。分界见上面的
+  profile 一节——「改了一个忘了另一个」是**重叠**的段造成的，不重叠的两个文件不会。
+  它们都不进版本库（`.gitignore` 已配），所以密钥直接填在里面是安全的。
+  密钥字段一律用 `Secret`（= `SecretStr`，见 `config/models.py`）：
+  序列化时自动变 `**********`，`job config show --json` 与 Web 的 `/api/config`
+  天然不漏——**防泄漏靠类型，不靠记得在某处补脱敏**。加新密钥就加个 `Secret` 字段，
+  别再写 `redacted()` 那类需要逐个维护的方法。取明文只在真正要用的那一处
+  （`require_token()` 构造请求头、`require_api_key()` 给 SDK）。
+  密钥不回显到终端，不写进提交；不想落盘就用 `JOB_AGENT_<节>__<字段>` 环境变量覆盖。
 - **不替用户编造简历事实或求职偏好。** 信息缺失就留 `<待补>` 并说明缺什么。
 - **`job apply` 是投递，不可撤销。** 除用户明确要求外不要跑。
-- **`config/` 下除 `*.example.*` 外、以及整个 `data/`，都不进版本库**（`.gitignore` 已配）。
+- **`config/config.toml` 与整个 `profiles/` 不进版本库**（`.gitignore` 已配）；
+  `config/config.example.toml` 与 `config/templates/` 进。
 - 分析口径上的坑（薪资区间重叠过滤、`searchKeyword` 与分类兜底的关系、
   接口限速实测值）见 README 的「分析口径」与「接口限速」两节，改相关代码前先读。
 

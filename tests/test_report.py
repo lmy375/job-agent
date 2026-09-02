@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from conftest import make_job
+from conftest import make_detail, make_job
 from job_agent.core.analysis import analyze
 from job_agent.core.report import build, load_insights
 from job_agent.core.report.insights import MATCH_TABLE_PLACEHOLDER
@@ -16,9 +16,7 @@ def seed(context):
             [make_job(index, jobName=f"AI Agent 工程师{index}", salary="80-100k·15薪")],
             keyword="AI Agent",
         )
-        context.details.upsert(
-            {"jobId": index, "description": f"{AI_JD} 变体{index}", "status": "ok"}
-        )
+        context.details.upsert(make_detail(index, description=f"{AI_JD} 变体{index}"))
 
 
 def test_load_insights_template(insights_dir):

@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
+import { formatTime } from "../format.js";
 
 const PAGE_SIZE = 50;
 
@@ -273,7 +274,7 @@ function JobDetail({ detail }) {
           投递记录：
           {detail.applications.map((a) => (
             <div key={a.id}>
-              {a.appliedAt} · {a.status} · {a.message}
+              {formatTime(a.appliedAt)} · {a.status} · {a.message}
             </div>
           ))}
         </div>

@@ -1,7 +1,7 @@
 """测试夹具。
 
 原则：**测试不碰真实的 jobs.db，也不发任何网络请求**。
-每个测试都在临时目录里搭一套完整的 config/ + data/，
+每个测试都在临时目录里搭一套完整的 config/ + profiles/test/，
 这样也顺便验证了「换一个项目根目录也能跑」这件事。
 """
 
@@ -16,14 +16,48 @@ import pytest
 from job_agent.config import Settings, load_settings
 from job_agent.context import AppContext
 from job_agent.core.liepin.models import Job
+from job_agent.core.storage import JobDetailRow
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+#: 全局配置（config/config.toml）：跟人无关的那一半
 CONFIG_TOML = """
+[profiles]
+dir = "profiles"
+default = "test"
+
+[liepin]
+rate_limit_per_min = 60
+
+[liepin.accounts.default]
+user_token = "test-token"
+
+[detail]
+sleep_min = 0
+sleep_max = 0
+block_backoff = 0
+max_retries = 2
+
+[agent]
+provider = "anthropic"
+checkpoint = "data/agent-checkpoint.db"
+plan_output = "data/agent-plan.md"
+
+[agent.providers.anthropic]
+api = "anthropic"
+model = "claude-opus-5"
+
+[logging]
+level = "WARNING"
+"""
+
+#: profile 配置（profiles/test/profile.toml）：随人而变的那一半
+PROFILE_TOML = """
 [profile]
 name = "测试用户"
-resume = "config/resume.md"
-preferences = "config/preferences.md"
+account = "default"
+resume = "resume.md"
+preferences = "preferences.md"
 
 [search]
 address = "北京"
@@ -44,30 +78,21 @@ track = "Web3"
 enabled = false
 keywords = ["区块链"]
 
-[liepin]
-rate_limit_per_min = 60
-
-[detail]
-sleep_min = 0
-sleep_max = 0
-block_backoff = 0
-max_retries = 2
-
 [storage]
 database = "data/test.db"
 
-
 [match]
-rules = "config/match.toml"
+rules = "match.toml"
 shortlist_output = "data/shortlist.md"
 
 [report]
 output = "data/report.html"
-insights_dir = "config/insights"
-
-[logging]
-level = "WARNING"
+insights_dir = "insights"
 """
+
+#: 测试用的 profile 名。夹具都用它，不用 "default"——
+#: 免得哪个用例不小心读到仓库里真实的 profiles/default
+PROFILE = "test"
 
 
 #: 一份最小可用的信号表。刻意小：测试要能一眼看出「这条分数为什么是这个数」。
@@ -97,24 +122,38 @@ pattern = '预训练|强化学习|模型训练'
 """
 
 
+def make_profile(root: Path, name: str = PROFILE, profile_toml: str = PROFILE_TOML) -> Path:
+    """在 ``root`` 下建一个 profile 目录。多 profile 的隔离用例靠它建第二个。"""
+    directory = root / "profiles" / name
+    (directory / "data").mkdir(parents=True)
+    (directory / "profile.toml").write_text(profile_toml, encoding="utf-8")
+    (directory / "resume.md").write_text("# 测试简历\n", encoding="utf-8")
+    (directory / "preferences.md").write_text("# 求职偏好\n", encoding="utf-8")
+    (directory / "match.toml").write_text(MATCH_TOML, encoding="utf-8")
+    return directory
+
+
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
-    """一个可用的项目根目录（config/ + data/）。"""
+    """一个可用的项目根目录（全局 config/ + 一个名为 test 的 profile）。"""
     (tmp_path / "config").mkdir()
-    (tmp_path / "data").mkdir()
     (tmp_path / "config" / "config.toml").write_text(CONFIG_TOML, encoding="utf-8")
-    (tmp_path / "config" / "resume.md").write_text("# 测试简历\n", encoding="utf-8")
-    (tmp_path / "config" / "preferences.md").write_text("# 求职偏好\n", encoding="utf-8")
-    (tmp_path / "config" / ".env").write_text("LIEPIN_USER_TOKEN=test-token\n", encoding="utf-8")
-    (tmp_path / "config" / "match.toml").write_text(MATCH_TOML, encoding="utf-8")
+    make_profile(tmp_path)
     return tmp_path
 
 
 @pytest.fixture
+def profile_dir(project_root: Path) -> Path:
+    """当前测试 profile 的目录。简历、信号表、库都在里面。"""
+    return project_root / "profiles" / PROFILE
+
+
+@pytest.fixture
 def settings(project_root: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    # 真实环境里的 token 不能泄进测试，否则「缺 token」的用例会假通过
-    monkeypatch.delenv("LIEPIN_USER_TOKEN", raising=False)
-    return load_settings(project_root / "config" / "config.toml")
+    # 真实环境里的覆盖不能泄进测试，否则「缺 token」的用例会假通过
+    monkeypatch.delenv("JOB_AGENT_LIEPIN__ACCOUNTS__DEFAULT__USER_TOKEN", raising=False)
+    monkeypatch.delenv("JOB_AGENT_PROFILE_NAME", raising=False)
+    return load_settings(PROFILE, project_root / "config" / "config.toml")
 
 
 @pytest.fixture
@@ -125,14 +164,14 @@ def context(settings: Settings) -> Iterator[AppContext]:
 
 
 @pytest.fixture
-def insights_dir(project_root: Path) -> Path:
-    """把仓库里的 insights 模板复制过来。
+def insights_dir(profile_dir: Path) -> Path:
+    """把仓库里的 insights 模板复制进测试 profile。
 
-    用 ``insights.example``（进版本库）而不是用户自己的 ``insights``（不进版本库），
-    这样新克隆下来测试也能跑，顺带验证模板本身始终可解析。
+    用 ``config/templates/insights``（进版本库）而不是用户自己的 profile
+    （不进版本库），这样新克隆下来测试也能跑，顺带验证模板本身始终可解析。
     """
-    target = project_root / "config" / "insights"
-    shutil.copytree(REPO_ROOT / "config" / "insights.example", target)
+    target = profile_dir / "insights"
+    shutil.copytree(REPO_ROOT / "config" / "templates" / "insights", target)
     return target
 
 
@@ -156,6 +195,11 @@ def make_job(job_id: int = 1, **overrides: object) -> Job:
     }
     data.update(overrides)
     return Job.model_validate(data)
+
+
+def make_detail(job_id: int = 1, status: str = "ok", **overrides: object) -> JobDetailRow:
+    """构造一条 JD 详情行，字段与 job_details 表一致。"""
+    return JobDetailRow(jobId=job_id, status=status, **overrides)
 
 
 def ld_json_page(

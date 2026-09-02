@@ -1,17 +1,47 @@
-"""``job match``：按 ``config/match.toml`` 的信号表给库里的职位分诊排序。"""
+"""``job match``：按当前 profile 的 ``match.toml`` 信号表给库里的职位分诊排序。"""
 
 from __future__ import annotations
 
-import json
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from job_agent.cli.state import CliState, echo_warn
 from job_agent.core.matching import ScoredJob, load_rules, rank
 
 #: 终端默认只列这么多；再多就该看 job shortlist 或 job web 了
 DEFAULT_TOP = 20
+
+
+class MatchJson(BaseModel):
+    """``--json`` 的输出条目。字段是脚本要读的契约，所以定成 model 而不是现拼 dict。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    jobId: int
+    score: float
+    title: str
+    company: str
+    salary: str
+    salaryLowWan: float | None
+    salaryHighWan: float | None
+    location: str
+    industry: str
+    workYears: str
+    education: str
+    track: str
+    role: str
+    keyword: str
+    dupes: int
+    url: str
+    hits: list[str]
+    penalties: list[str]
+    offTrack: bool
+
+
+#: 一次构造、反复使用；顺带保证 --json 的输出始终符合 MatchJson 的 schema
+_MATCH_JSON = TypeAdapter(list[MatchJson])
 
 
 def match(
@@ -44,7 +74,8 @@ def match(
         raise typer.Exit(code=1)
 
     if as_json:
-        typer.echo(json.dumps([_to_dict(j) for j in jobs[:top]], ensure_ascii=False, indent=2))
+        payload = [_as_json(job) for job in jobs[:top]]
+        typer.echo(_MATCH_JSON.dump_json(payload, indent=2).decode())
         return
 
     threshold = floor if floor is not None else settings.match.salary_floor_wan
@@ -88,26 +119,26 @@ def _clip(text: str, width: int) -> str:
     return "".join(out)
 
 
-def _to_dict(job: ScoredJob) -> dict[str, Any]:
+def _as_json(job: ScoredJob) -> MatchJson:
     row = job.row
-    return {
-        "jobId": job.job_id,
-        "score": round(job.score, 1),
-        "title": job.title,
-        "company": job.company,
-        "salary": row.get("salary"),
-        "salaryLowWan": job.salary_low,
-        "salaryHighWan": job.salary_high,
-        "location": row.get("location"),
-        "industry": row.get("industry"),
-        "workYears": row.get("workYears"),
-        "education": row.get("education"),
-        "track": row.get("track"),
-        "role": row.get("role"),
-        "keyword": row.get("keyword"),
-        "dupes": row.get("dupes"),
-        "url": row.get("url"),
-        "hits": [h.label() for h in job.hits],
-        "penalties": [h.label() for h in job.penalties],
-        "offTrack": job.off_track,
-    }
+    return MatchJson(
+        jobId=job.job_id,
+        score=round(job.score, 1),
+        title=job.title,
+        company=job.company,
+        salary=row.salary,
+        salaryLowWan=job.salary_low,
+        salaryHighWan=job.salary_high,
+        location=row.location,
+        industry=row.industry,
+        workYears=row.workYears,
+        education=row.education,
+        track=row.track,
+        role=row.role,
+        keyword=row.keyword,
+        dupes=row.dupes,
+        url=row.url,
+        hits=[h.label() for h in job.hits],
+        penalties=[h.label() for h in job.penalties],
+        offTrack=job.off_track,
+    )
