@@ -204,6 +204,8 @@ job-agent [-p <名字>] [--collect] [--apply]   # 同一条流程的无人值守
 - **`job apply` 是投递，不可撤销。** 除用户明确要求外不要跑。
 - **`config/config.toml` 与整个 `profiles/` 不进版本库**（`.gitignore` 已配）；
   `config/config.example.toml` 与 `config/templates/` 进。
+- **默认直接往 `main` 提交并推送，不建分支、不开 PR。** 除非用户明确要求走分支或 PR。
+  这是个单人仓库，没有代码评审环节，分支只会多两次切换、留一堆没人合的残枝。
 - 分析口径上的坑（薪资区间重叠过滤、`searchKeyword` 与分类兜底的关系、
   接口限速实测值）见 README 的「分析口径」与「接口限速」两节，改相关代码前先读。
 
