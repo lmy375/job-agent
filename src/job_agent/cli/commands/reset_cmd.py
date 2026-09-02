@@ -1,7 +1,7 @@
 """``job reset``：删掉数据库文件并重建空库。
 
 仓库不做向后兼容：库结构一变就重建，不写迁移、不补列、不回填
-（见 CLAUDE.md 的硬规则）。数据随时可以用 `job search` + `job detail` 重新采集。
+（见 CLAUDE.md 的硬规则）。数据随时可以用 `job search` 重新采集。
 
 **投递记录会一起没**——猎聘没有查询投递记录的接口，本地这张表是唯一的账本，
 所以默认要确认一次，并且单独把已有的投递条数报出来。
@@ -46,4 +46,4 @@ def reset(
     echo_ok(f"已重建空库：{path}")
     # 删的是文件：别的进程握着的是被删掉的 inode，还会读到旧数据
     typer.echo("\n如果 `job web` 正在跑，重启它——老连接指向的还是删掉的那个文件。")
-    typer.echo("下一步：job search 重新采集，再跑 job detail 抓 JD。")
+    typer.echo("下一步：job search 重新采集（搜完自动抓 JD）。")

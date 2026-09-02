@@ -2,7 +2,7 @@
 
 这个仓库有四个入口——**skill、CLI、agent、Web**。它们不是四个功能，
 而是同一套内核的四种驱动方式：数据库是同一个，配置是同一份，
-`job match` 和 `job-agent` 对同一批岗位给出同一个排序。
+`job score` 和 `job agent` 对同一批岗位给出同一个排序。
 
 区别只在**谁来做判断、判断发生在什么时候**：
 
@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | **CLI** `job …` | 你（或 skill / 脚本） | 不判断，只出确定性结果 | 骨架。所有别的路径都在调它或它调的东西 |
 | **skill** `/job-init`、`/job-match` | Claude 和你一起 | **对话里**，你能当场反驳 | 要深聊、要改口径时用这条 |
-| **agent** `job-agent` | LangGraph 管线 | **跑的过程中**，事后看 `agent-plan.md` | 一条命令跑完，无人值守 |
+| **agent** `job agent` | LangGraph 管线 | **跑的过程中**，事后看 `agent-plan.md` | 一条命令跑完，无人值守 |
 | **Web** `job web` | 你点鼠标 | 不判断，只看和投 | 翻 JD、看库存、点投递 |
 
 > **先记住一件事**：所有路径都按 **profile** 隔离，一个 profile = 一个人 / 一种求职场景。
@@ -29,11 +29,11 @@
 
 ```
 还没配置过                    → /job-init（skill）
-想采数据 / 重跑一遍           → job search、job detail（CLI）
+想采数据 / 重跑一遍           → job search（CLI，搜完自动抓 JD）
 采完了，想知道该投哪几个       → /job-match（skill）  ← 首选
-    ├ 想让它自己跑完不用陪    → job-agent（agent）
+    ├ 想让它自己跑完不用陪    → job agent（agent 路线）
     └ 想自己一条条翻着看      → job web（Web）
-真要投了                      → job apply（CLI）或 Web 上点，或 job-agent --apply
+真要投了                      → job apply（CLI）或 Web 上点，或 job agent --apply
 ```
 
 一句话版本：**配置和挑岗位走 skill，采集和投递走 CLI，浏览走 Web，
@@ -52,7 +52,7 @@
 **只负责有唯一正确答案的事**：采集、限流退避、去重、JD 解析、薪资换算、
 按信号表打分排序。同一个库跑两次，结论必须一模一样。
 
-反过来说，**CLI 刻意不下结论**。`job shortlist` 生成的清单里，
+反过来说，**CLI 刻意不下结论**。`job score --shortlist` 生成的清单里，
 「硬门槛核对 / 投不投 / 投递口径」三处留白写着 `<待 /job-match 填写>`——
 不是没做完，是故意的：填一段模板话术，人会误以为已经分析过了，比留空更糟。
 
@@ -61,10 +61,9 @@
 日常就这一条链：
 
 ```bash
-uv run job search        # 按 profile.toml 的关键词批量搜，按 jobId 去重
-uv run job detail        # 抓详情页 JD（串行 + 随机休眠，急不得）
-uv run job match --top 30 --why    # 打分排序，--why 展开命中与扣分理由
-uv run job shortlist --limit 12    # 写出候选清单骨架
+uv run job search        # 按关键词批量搜（按 jobId 去重），搜完接着抓 JD
+uv run job score --top 30 --why    # 打分排序，--why 展开命中与扣分理由
+uv run job score --shortlist -n 12 # 写出候选清单骨架
 ```
 
 首次使用多两步：
@@ -76,10 +75,10 @@ uv run job profile new me      # 建 profile（简历、关键词、库都在它
 
 ### 几条实践建议
 
-- **`job detail` 慢是正常的，别调快。** 服务端实测约 10 次 / 60s 滑动窗口，
+- **`job search` 的抓 JD 那半段慢是正常的，别调快。** 服务端实测约 10 次 / 60s 滑动窗口，
   触发后冷却 20 分钟以上且失败是静默的。限流按 token 记账，换 IP 无效。
   进度直接落库，中断后重跑自动跳过已完成项——所以放着跑就行。
-- **`job match --why` 是用来体检信号表的，不是用来看排名的。**
+- **`job score --why` 是用来体检信号表的，不是用来看排名的。**
   扫一遍命中理由：该进的没进 → 缺正信号；不该进的排很高 → 缺负信号。
   发现问题**改 profile 的 `match.toml` 再重跑**，别在脑子里手工纠偏——
   手工纠偏这次能用，下次跑又是老样子。
@@ -122,19 +121,19 @@ uv run job profile new me      # 建 profile（简历、关键词、库都在它
 - **不替你编造事实**。信息缺失就留 `<待补>` 并告诉你缺什么。
 
 > 别只填 token 就收工。简历、偏好、信号表决定了「采到的数据有没有用」——
-> `job match` 的排序、挑岗位、面试准备，全部以它们为输入。
+> `job score` 的排序、挑岗位、面试准备，全部以它们为输入。
 
 ### `/job-match`：挑出该投的几个岗
 
 **采完数据之后的默认下一步**，也是四条路径里最该常用的一条。
 它做 CLI 做不了的事：逐条读 JD 比硬门槛、判断投不投、排优先级、写投递口径，
-把 `job shortlist` 留白的三处填掉。
+把 `job score --shortlist` 留白的三处填掉。
 
 典型对话：
 
 ```
 你：/job-match
-Claude：（确认 profile → 跑 match --why → 读简历与偏好 → 逐条读 JD → 填清单 → 给结论）
+Claude：（确认 profile → 跑 job score --why → 读简历与偏好 → 逐条读 JD → 填清单 → 给结论）
 你：第 3 条那个管理规模的判断我不同意，我实线 5 人但虚线带过 20 人
 Claude：（修正硬门槛核对，重排优先级）
 ```
@@ -153,9 +152,9 @@ Claude：（修正硬门槛核对，重排优先级）
 
 ---
 
-## 路径三：agent（`job-agent`）——同一条流程的无人值守版
+## 路径三：agent（`job agent`）——同一条流程的无人值守版
 
-`/job-match` 是交互式的，你得陪着。`job-agent` 是 LangGraph 组的固定管线：
+`/job-match` 是交互式的，你得陪着。`job agent` 是 LangGraph 组的固定管线：
 一条命令跑完 **采集 → 分诊 → 逐岗审读 → 投递计划**，共享同一个数据库和同一份配置。
 
 ### 前置
@@ -170,15 +169,15 @@ uv sync --extra agent
 ### 推荐用法
 
 ```bash
-uv run job-agent                      # 用库内已有数据：分诊 → 审读 → data/agent-plan.md
-uv run job-agent --collect            # 连采集一起：search + detail 再走上面
-uv run job-agent --top 15             # 送审岗位数上限（按条计费，这是成本闸门）
-uv run job-agent --provider deepseek  # 换模型：用 [agent.providers.deepseek]
-uv run job-agent --thread run-x       # 中断后用同一 thread 从 checkpoint 续跑
-uv run job-agent --apply              # 出完计划后进入投递确认（终端里逐条拍板）
+uv run job agent                      # 用库内已有数据：分诊 → 审读 → data/agent-plan.md
+uv run job agent --collect            # 连采集一起：搜索 + 抓 JD 再走上面
+uv run job agent -n 15                # 送审岗位数上限（按条计费，这是成本闸门）
+uv run job agent --provider deepseek  # 换模型：用 [agent.providers.deepseek]
+uv run job agent --thread run-x       # 中断后用同一 thread 从 checkpoint 续跑
+uv run job agent --apply              # 出完计划后进入投递确认（终端里逐条拍板）
 ```
 
-最典型的场景是**挂着跑**：晚上 `job-agent --collect`，第二天早上看
+最典型的场景是**挂着跑**：晚上 `job agent --collect`，第二天早上看
 `<profile>/data/agent-plan.md`。
 
 ### 必须知道的四件事
@@ -186,7 +185,7 @@ uv run job-agent --apply              # 出完计划后进入投递确认（终�
 - **投递前必经 interrupt。** `--apply` 只是打开闸门，真正投哪几个要在终端里
   逐条输入 job_id 确认；不传 `--apply` 时流程在写完计划后就结束。
 - **LLM 只出现在审读节点。** 采集、去重、打分、排序、计划渲染全是共享内核里的
-  确定性代码——所以 `job match` 和 `job-agent` 对同一份数据给出同一个 shortlist，
+  确定性代码——所以 `job score` 和 `job agent` 对同一份数据给出同一个 shortlist，
   两条路线的差异只在「读 JD 之后怎么判」。
 - **模型是配置不是代码。** 一张 `[agent.providers.*]` 表就是一个接入点，
   客户端只有 `api = "anthropic"` 和 `api = "openai"` 两类；DeepSeek、Kimi、通义、
@@ -246,14 +245,14 @@ API 文档在 `/docs`。前端开发：`cd frontend && npm run dev`（5173，`/a
 
 ```
 第 1 天   /job-init                       建 profile、填简历与偏好与信号表
-          job search → job detail         采一批数据（detail 慢，挂着跑）
+          job search                      采一批数据（抓 JD 那半段慢，挂着跑）
           job web                         先翻一遍库存，对市场有个体感
 
 第 2 天   /job-match                      逐条读 JD、排优先级、写口径
                                           ↑ 这一步会顺手校准 match.toml
           job apply <id>...               或在 Web 上点投递
 
-之后      job-agent --collect             口径稳定后，定期无人值守扫新岗
+之后      job agent --collect             口径稳定后，定期无人值守扫新岗
           job web                         翻新出现的 JD
 ```
 
@@ -287,9 +286,9 @@ uv run job profile use web3       # 设为默认，之后不用每次带 -p
 
 ## 常见问题
 
-**采完了但 `job match` 一条都排不上来？**
+**采完了但 `job score` 一条都排不上来？**
 多半是 `[require].pattern` 写窄了，或 `match.salary_floor_wan` 门槛太高。
-跑 `job match --why` 看扣分理由。注意薪资门槛过滤的是 JD 区间的**上限**
+跑 `job score --why` 看扣分理由。注意薪资门槛过滤的是 JD 区间的**上限**
 （那才代表「这家最多给到多少」），不是下限。
 
 **想看「这个方向在招什么、要什么技能」？**

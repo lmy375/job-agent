@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,9 @@ from job_agent.cli import app
 from job_agent.context import AppContext
 from job_agent.core.liepin.errors import LiepinRateLimited
 from job_agent.core.liepin.models import ApplyJobResult
+from job_agent.core.services import DetailService, SearchService
+from job_agent.core.services.detail import DetailSummary
+from job_agent.core.services.search import SearchSummary
 from job_agent.core.storage import Database, JobRepository
 
 runner = CliRunner()
@@ -41,7 +45,7 @@ def test_version():
 def test_help_lists_commands():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for command in ("search", "detail", "apply", "stats", "web", "config", "db"):
+    for command in ("search", "score", "apply", "agent", "stats", "web", "config", "db"):
         assert command in result.stdout
 
 
@@ -162,6 +166,54 @@ def test_search_dry_run_does_not_hit_network(config_path, monkeypatch):
     assert "AI Agent" in result.stdout
 
 
+@pytest.fixture
+def fake_collect(monkeypatch):
+    """把两个服务的 run 换成假的，只记录「detail 有没有被调到」。"""
+    calls: list[str] = []
+
+    def fake_search_run(_self, **_kwargs):
+        calls.append("search")
+        return SearchSummary(results=[])
+
+    def fake_detail_run(_self, **_kwargs):
+        calls.append("detail")
+        return DetailSummary()
+
+    monkeypatch.setattr(AppContext, "client", lambda _self: nullcontext(object()))
+    monkeypatch.setattr(SearchService, "run", fake_search_run)
+    monkeypatch.setattr(DetailService, "run", fake_detail_run)
+    monkeypatch.setattr(DetailService, "close", lambda _self: None)
+    return calls
+
+
+def test_search_fetches_details_afterwards(config_path, fake_collect):
+    """两条命令合并的核心承诺：搜完自动接着抓 JD。"""
+    assert run(config_path, "search").exit_code == 0
+    assert fake_collect == ["search", "detail"]
+
+
+def test_search_no_detail_stops_after_search(config_path, fake_collect):
+    assert run(config_path, "search", "--no-detail").exit_code == 0
+    assert fake_collect == ["search"]
+
+
+def test_agent_without_extra_reports_missing_dependency(config_path, monkeypatch):
+    """没装 --extra agent 时，`job agent` 要给出装依赖的办法，而不是 ImportError。"""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name.startswith("langgraph"):
+            raise ImportError(name=name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    result = run(config_path, "agent")
+    assert result.exit_code == 2
+    assert "--extra agent" in result.stderr
+
+
 def test_db_info(config_path):
     assert run(config_path, "db", "info").exit_code == 0
 
@@ -245,7 +297,7 @@ def test_bad_config_path_exits_with_code_2():
     assert result.exit_code == 2
 
 
-# ---------------------------------------------------------------- match / shortlist
+# ---------------------------------------------------------------- score
 
 
 def seed_agent_job(context, job_id: int = 1, salary: str = "80-100k·20薪") -> None:
@@ -258,77 +310,83 @@ def seed_agent_job(context, job_id: int = 1, salary: str = "80-100k·20薪") -> 
 
 def test_help_lists_new_commands():
     result = runner.invoke(app, ["--help"])
-    for command in ("match", "shortlist", "resume"):
+    for command in ("score", "resume", "profile"):
         assert command in result.stdout
 
 
-def test_match_without_data_exits_nonzero(config_path):
-    result = run(config_path, "match")
+def test_score_without_data_exits_nonzero(config_path):
+    result = run(config_path, "score")
     assert result.exit_code == 1
     assert "没有可排序的职位" in result.stdout
 
 
-def test_match_lists_jobs(config_path, context):
+def test_score_lists_jobs(config_path, context):
     seed_agent_job(context)
-    result = run(config_path, "match")
+    result = run(config_path, "score")
     assert result.exit_code == 0
     assert "Agent 平台工程师" in result.stdout
     # 提醒必须在：分数只做分诊
     assert "分诊" in result.stdout
 
 
-def test_match_why_shows_reasons(config_path, context):
+def test_score_why_shows_reasons(config_path, context):
     seed_agent_job(context)
-    result = run(config_path, "match", "--why")
+    result = run(config_path, "score", "--why")
     assert result.exit_code == 0
     assert "Agent" in result.stdout
     assert "Python" in result.stdout
 
 
-def test_match_json_is_parseable(config_path, context):
+def test_score_json_is_parseable(config_path, context):
     import json
 
     seed_agent_job(context)
-    result = run(config_path, "match", "--json")
+    result = run(config_path, "score", "--json")
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data[0]["jobId"] == 1
     assert "Agent" in " ".join(data[0]["hits"])
 
 
-def test_match_floor_filters(config_path, context):
+def test_score_floor_filters(config_path, context):
     seed_agent_job(context, salary="20-30k·12薪")  # 上限 36 万
-    result = run(config_path, "match", "--floor", "135")
+    result = run(config_path, "score", "--floor", "135")
     assert result.exit_code == 1
     assert "门槛太高" in result.stdout
 
 
-def test_match_missing_rules_file(config_path, profile_dir, context):
+def test_score_missing_rules_file(config_path, profile_dir, context):
     seed_agent_job(context)
     (profile_dir / "match.toml").unlink()
-    result = run(config_path, "match")
+    result = run(config_path, "score")
     assert result.exit_code == 2
     assert "匹配信号表不存在" in result.stderr
 
 
-def test_shortlist_writes_file(config_path, context, tmp_path):
+def test_score_shortlist_writes_file(config_path, profile_dir, context):
     seed_agent_job(context)
-    target = tmp_path / "out" / "shortlist.md"
-    result = run(config_path, "shortlist", "-o", str(target))
+    result = run(config_path, "score", "--shortlist")
     assert result.exit_code == 0
+    target = profile_dir / "data" / "shortlist.md"
     assert target.is_file()
     body = target.read_text(encoding="utf-8")
     assert "Agent 平台工程师" in body
     assert "<待 /job-match 填写>" in body
 
 
-def test_shortlist_without_data_exits_nonzero(config_path):
-    result = run(config_path, "shortlist")
+def test_score_shortlist_without_data_exits_nonzero(config_path):
+    result = run(config_path, "score", "--shortlist")
     assert result.exit_code == 1
 
 
+def test_score_rejects_two_output_forms(config_path, context):
+    seed_agent_job(context)
+    result = run(config_path, "score", "--json", "--shortlist")
+    assert result.exit_code != 0
+
+
 def test_config_validate_reports_bad_match_rules(config_path, profile_dir):
-    """信号表里的正则写错，validate 就该报出来，而不是等 job match 炸。"""
+    """信号表里的正则写错，validate 就该报出来，而不是等 job score 炸。"""
     (profile_dir / "match.toml").write_text(
         '[[signals]]\nname="x"\nweight=1\npattern="([unclosed"\n', encoding="utf-8"
     )

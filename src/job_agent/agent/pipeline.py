@@ -40,7 +40,7 @@ def load_profile(settings: Settings) -> tuple[str, str]:
 def build_shortlist(ctx: AppContext, top_n: int) -> list[ShortlistJob]:
     """规则分诊：读库、打分、取前 ``top_n``，转成审读节点用的载荷。
 
-    与 ``job match`` 用的是同一套 ``load_rules`` + ``rank``，
+    与 ``job score`` 用的是同一套 ``load_rules`` + ``rank``，
     两条执行路线对同一份数据得到同一个 shortlist。
     """
     rules = load_rules(ctx.settings.match.rules)

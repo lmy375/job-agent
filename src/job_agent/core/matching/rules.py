@@ -120,7 +120,7 @@ def load_rules(path: Path) -> MatchRules:
 
     缺文件、TOML 语法错、正则写错都抛 :class:`ConfigError`。
 
-    刻意不做「文件不存在就用空表兜底」——空表会让 ``job match`` 输出一份
+    刻意不做「文件不存在就用空表兜底」——空表会让 ``job score`` 输出一份
     全是 0 分的排名，看起来像跑成功了，实际毫无意义。宁可直接报错。
     """
     if not path.is_file():

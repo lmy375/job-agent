@@ -4,6 +4,11 @@
 ``agent/``（LangGraph 独立执行）。二者只允许依赖共享内核
 （``core/``、``config/``、``context`` 等顶层模块），互相 import 即架构错误。
 
+唯一的豁免是 ``cli/commands/agent_cmd.py``——``job agent`` 这个入口总得有人
+把两边接起来。它只许 import ``job_agent.agent.runner``（把选项翻成
+``AgentRunOptions`` 就交出去），一行流程逻辑都不写；豁免按**文件名 + 被 import
+的模块名**双重钉死，防止它慢慢变成第二条 agent 实现。
+
 另一条硬规则见 CLAUDE.md：结构体一律 pydantic ``BaseModel``，
 不许 ``@dataclass`` / ``NamedTuple``——两套写法并存，读代码的人每次都要先
 分辨「这个能不能校验、怎么序列化」。
@@ -19,6 +24,11 @@ from pathlib import Path
 import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "job_agent"
+
+#: 唯一的跨路线入口：文件 -> 它被允许 import 的模块（精确匹配，不含子模块）
+ALLOWED_BRIDGE: dict[str, tuple[str, ...]] = {
+    "cli/commands/agent_cmd.py": ("job_agent.agent.runner",),
+}
 
 #: 包 -> 不许 import 的前缀
 FORBIDDEN: dict[str, tuple[str, ...]] = {
@@ -47,17 +57,37 @@ def test_route_isolation(package: str) -> None:
     banned = FORBIDDEN[package]
     offenders: list[str] = []
     for file in sorted((SRC / package).rglob("*.py")):
+        allowed = ALLOWED_BRIDGE.get(file.relative_to(SRC).as_posix(), ())
         bad = {
             imp
             for imp in _imports_of(file)
             if any(imp == b or imp.startswith(b + ".") for b in banned)
+            and imp not in allowed
         }
         if bad:
             offenders.append(f"{file.relative_to(SRC.parent)} -> {sorted(bad)}")
     assert not offenders, (
         f"依赖边界被打破：job_agent.{package} 不许 import {list(banned)}。\n"
         "两条执行路线（cli+web / agent）互相独立，可复用的逻辑请下沉到 core/。\n"
+        f"唯一的豁免是 {list(ALLOWED_BRIDGE)}，且只能 import 各自允许的那个模块。\n"
         + "\n".join(offenders)
+    )
+
+
+def test_bridge_stays_thin() -> None:
+    """豁免文件只许薄薄一层：翻选项、调 run、返回退出码。
+
+    钉住行数是刻意的——它一旦开始长，就说明流程逻辑正在往 cli/ 里渗。
+    """
+    bridge = SRC / "cli" / "commands" / "agent_cmd.py"
+    body = [
+        line for line in bridge.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert len(body) < 80, (
+        f"{bridge.name} 有 {len(body)} 行有效代码，太厚了。"
+        "它只该把命令行选项翻成 AgentRunOptions 再交给 agent/runner.py，"
+        "流程逻辑一律留在 agent/ 里。"
     )
 
 

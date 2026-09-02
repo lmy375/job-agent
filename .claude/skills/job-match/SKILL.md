@@ -1,6 +1,6 @@
 ---
 name: job-match
-description: 从库里的职位数据挑出该投的岗位——跑 job match 分诊、逐条读 JD 比硬门槛、排投递优先级、写投递口径与面试准备。当用户说「该投哪几个岗」「帮我挑岗位」「筛一下职位」「job-match」「看看有什么合适的机会」，或已经跑完 job search / job detail 想知道下一步投什么时使用。
+description: 从库里的职位数据挑出该投的岗位——跑 job score 分诊、逐条读 JD 比硬门槛、排投递优先级、写投递口径与面试准备。当用户说「该投哪几个岗」「帮我挑岗位」「筛一下职位」「job-match」「看看有什么合适的机会」，或已经跑完 job search 想知道下一步投什么时使用。
 ---
 
 # job-match
@@ -11,7 +11,7 @@ description: 从库里的职位数据挑出该投的岗位——跑 job match �
 
 | 谁做 | 做什么 |
 | --- | --- |
-| **CLI**（`job match` / `job shortlist`） | 打分、排序、薪资解析、去重 —— 可重跑、两次一样 |
+| **CLI**（`job score`） | 打分、排序、薪资解析、去重 —— 可重跑、两次一样 |
 | **Config**（profile 目录） | 简历、求职偏好、匹配信号表 —— 随人而变，一个 profile 一份 |
 | **你**（这个 skill） | 读 JD 比硬门槛、判断投不投、排优先级、写投递口径 |
 
@@ -36,7 +36,7 @@ uv run job -p <名字> config validate      # 简历、偏好、信号表是否�
 uv run job -p <名字> stats                # 库里有多少数据、抓了多少 JD
 ```
 
-库是空的 → 先让用户跑 `job search` + `job detail`，别硬做。
+库是空的 → 先让用户跑 `job search`（它会搜完接着抓 JD），别硬做。
 
 **路径一律从 `config path --json` 取，不要按记忆拼 `config/resume.md` 这种路径**——
 它们随 profile 变。下面用 `<resume>` / `<preferences>` / `<match>` / `<database>`
@@ -54,7 +54,7 @@ uv run job -p <名字> stats                # 库里有多少数据、抓了多�
 ## 第 1 步：分诊
 
 ```bash
-uv run job -p <名字> match --top 30 --why
+uv run job -p <名字> score --top 30 --why
 ```
 
 `--why` 会打出每条的命中与扣分信号。扫一遍，判断**信号表本身准不准**：
@@ -70,7 +70,7 @@ uv run job -p <名字> match --top 30 --why
 ## 第 2 步：生成清单骨架
 
 ```bash
-uv run job -p <名字> shortlist --limit 12
+uv run job -p <名字> score --shortlist -n 12
 ```
 
 产出 profile 的 `data/shortlist.md`（路径见 `config path --json` 的 `shortlist`），
@@ -82,7 +82,7 @@ uv run job -p <名字> shortlist --limit 12
 对清单里的每一条，先把完整 JD 读出来：
 
 ```bash
-uv run job -p <名字> match --json | python3 -c "import json,sys;print([j['url'] for j in json.load(sys.stdin)][:12])"
+uv run job -p <名字> score --json | python3 -c "import json,sys;print([j['url'] for j in json.load(sys.stdin)][:12])"
 ```
 
 JD 正文已经在库里，直接查比重新抓快（`<database>` 是 `config path --json` 给的库路径）：

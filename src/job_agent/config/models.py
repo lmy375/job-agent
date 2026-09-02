@@ -5,7 +5,7 @@
 - ``config/config.toml`` → :class:`GlobalSettings`，管「怎么连」：猎聘账号密钥、
   限速、模型接入点、Web 端口、日志。跟人无关，所有 profile 共享一份。
 - ``profiles/<name>/profile.toml`` → :class:`ProfileSettings`，管「找什么」：
-  简历、求职偏好、搜索条件与关键词、匹配门槛、报告。**随人而变**。
+  简历、求职偏好、搜索条件与关键词、匹配门槛。**随人而变**。
 
 不重叠是刻意的：同一个段要是能出现在两个文件里，下场一定是「改了一个忘了另一个」。
 放错文件时 ``extra="forbid"`` 会当场报错，loader 再按段名告诉你它该在哪个文件里。
@@ -81,7 +81,7 @@ class ProfilesConfig(_Model):
 class ProfileConfig(_Model):
     """求职者信息（profile 文件）。
 
-    ``resume`` 与 ``preferences`` 是写报告「给我的建议」章节时的输入，
+    ``resume`` 与 ``preferences`` 是 ``/job-match`` 挑岗位、写投递口径时的输入，
     也是 ``job-init`` skill 访谈后落地的两个文件。程序不解析它们的内容——
     刻意保持自由格式的 Markdown，人和模型都好读好改。
     """
@@ -201,7 +201,7 @@ class MatchConfig(_Model):
     """
 
     rules: Path = Path("match.toml")
-    #: `job shortlist` 的默认输出位置
+    #: `job score --shortlist` 的默认输出位置
     shortlist_output: Path = Path("data/shortlist.md")
     #: 只看薪资上限不低于这个数的岗位（万元/年，税前口径）。留空表示不过滤
     salary_floor_wan: float | None = Field(default=None, ge=0)

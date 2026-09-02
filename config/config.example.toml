@@ -9,7 +9,7 @@
 #                                   模型接入点、Web 端口、日志。跟人无关，所有
 #                                   profile 共享一份。
 #   profiles/<名字>/profile.toml   管「找什么」：简历、求职偏好、搜索条件与关键词、
-#                                   匹配门槛、报告。**随人而变**，一个 profile
+#                                   匹配门槛。**随人而变**，一个 profile
 #                                   就是一个人 / 一种求职场景，数据库也各自独立。
 #
 # **密钥都写在这里**（猎聘 token、模型 API key、LangSmith key）——config.toml
@@ -57,7 +57,7 @@ timeout = 30.0
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 # ------------------------------------------------- LangGraph 独立执行（可选）
-# 装了 agent extra（uv sync --extra agent）后，`job-agent` 一条命令跑完
+# 装了 agent extra（uv sync --extra agent）后，`job agent` 一条命令跑完
 # 采集 → 分诊 → LLM 审读 → 投递计划。
 # 判断依据（简历/偏好/信号表）与上面共享，这里只有运行参数与密钥。
 [agent]

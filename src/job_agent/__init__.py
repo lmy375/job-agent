@@ -1,9 +1,9 @@
-"""job-agent：猎聘职位采集、分析、投递与市场报告。
+"""job-agent：猎聘职位采集、分诊打分与投递。
 
 分层：
 
 - ``job_agent.config``  配置加载（config/*.toml，密钥也在里面），不依赖其它层
-- ``job_agent.core``    核心能力：猎聘客户端、存储、采集服务、分析、报告渲染
+- ``job_agent.core``    核心能力：猎聘客户端、存储、采集服务、打分排序、清单渲染
 - ``job_agent.cli``     命令行封装
 - ``job_agent.web``     FastAPI 管理后端（数据查看 + 采集任务 + 投递）
 

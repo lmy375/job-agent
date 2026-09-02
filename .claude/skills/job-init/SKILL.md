@@ -9,7 +9,7 @@ description: 交互式初始化 job-agent 的某个 profile——选定或新建
 **选 profile → token → 搜索条件 → 简历 → 求职偏好 → 匹配信号表**。
 
 前三件决定「能不能采到数据」，后三件决定「采到的数据有没有用」——
-`job match` 的排序、挑岗位、准备面试问答，
+`job score` 的排序、挑岗位、准备面试问答，
 全部以简历、偏好与信号表为输入。所以**不要只填 token 就收工**。
 
 ## 配置在哪：两个文件，别放错
@@ -155,7 +155,7 @@ uv run job search --dry-run
 
 ## 第 7 步：匹配信号表（profile 目录下的 `match.toml`）
 
-**这一步别跳过。** 缺了它 `job match` / `job shortlist` 跑不了，
+**这一步别跳过。** 缺了它 `job score` 跑不了，
 用户就只能停在「一堆数据」而到不了「该投哪几个岗」。
 
 模板里那份是给「AI 应用 / Agent 工程方向」写的。**先判断它对不对得上这个用户**——
@@ -185,24 +185,26 @@ uv run job search --dry-run
 
 ```bash
 uv run job -p <名字> config validate
-uv run job -p <名字> match --top 15 --why      # 库里已有数据时
+uv run job -p <名字> score --top 15 --why      # 库里已有数据时
 ```
 
 ## 第 8 步：自检并交代下一步
 
 ```bash
 uv run job -p <名字> config validate                    # 应当全部通过
-uv run job -p <名字> search -k "<某个关键词>" --pages 1   # 真实请求验证 token（可选，建议做）
+uv run job -p <名字> search -k "<某个关键词>" --pages 1 --no-detail   # 真实请求验证 token（可选，建议做）
+# --no-detail 是关键：这一步只为验证 token，别顺手把几百条 JD 抓起来
 ```
 
 然后告诉用户完整流程：
 
 ```
-job search → job detail → job match → job shortlist → /job-match → job apply
-                       ↘ job web （翻 JD、看库存、点投递）
+job search → job score → job score --shortlist → /job-match → job apply
+          ↘ job web （翻 JD、看库存、点投递）
 ```
 
-前四步是确定性的（可重跑、两次一样），`/job-match` 那一步是判断（读 JD 挑岗位）。
+`job search`（搜完自动抓 JD）与 `job score` 是确定性的（可重跑、两次一样），
+`/job-match` 那一步是判断（读 JD 挑岗位）。
 每条命令都能加 `-p <名字>`；这个 profile 是默认的话可以省。
 
 并提醒：`config/config.toml` 与整个 `profiles/` 都不进版本库（`.gitignore` 已配好），

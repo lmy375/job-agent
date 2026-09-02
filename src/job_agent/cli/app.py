@@ -1,8 +1,9 @@
 """``job`` 命令。
 
-    job search                 按配置的关键词批量搜索职位入库
-    job detail                 抓取职位详情页并解析 JD
+    job search                 搜索职位入库，接着抓详情页解析 JD
+    job score                  按信号表打分排序；--shortlist 写候选清单骨架
     job apply <jobId>...       投递职位
+    job agent                  LangGraph 路线：无人值守跑完整条流程
     job stats                  在终端看一眼库里现在有什么
     job web                    启动 Web 管理服务
     job reset                  删库重建（结构变了就重来，不做迁移）
@@ -44,8 +45,11 @@ class JobAgentGroup(TyperGroup):
 app = typer.Typer(
     cls=JobAgentGroup,
     add_completion=False,
+    # 关掉 rich markup：帮助文本里全是 [agent.providers.*] 这样的 TOML 段名，
+    # 开着的话方括号会被当成标记语言吃掉（"默认取 [profiles].default" 显示成 ".default"）
+    rich_markup_mode=None,
     no_args_is_help=True,
-    help="猎聘职位采集、分析、投递与市场报告。",
+    help="猎聘职位采集、分诊打分与投递。",
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 commands.register(app)

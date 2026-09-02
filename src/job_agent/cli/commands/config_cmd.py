@@ -164,11 +164,11 @@ def validate(ctx: typer.Context) -> None:
     if not settings.match.rules.is_file():
         problems.append(
             f"匹配信号表不存在：{settings.match.rules}"
-            "（跑 /job-init；缺它 job match / job shortlist 跑不了）"
+            "（跑 /job-init；缺它 job score 跑不了）"
         )
     else:
         # 存在就顺手解析一遍：正则写错、权重写成字符串这类问题要在这里暴露，
-        # 而不是等 job match 跑到一半才炸
+        # 而不是等 job score 跑到一半才炸
         try:
             load_rules(settings.match.rules)
         except ConfigError as exc:

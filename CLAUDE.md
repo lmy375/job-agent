@@ -75,12 +75,20 @@ CLI 把稳定的骨架固化下来，skill 把「怎么判断」的经验固化�
 | 路线 | 入口 | 适用 |
 | --- | --- | --- |
 | skill + Claude Code | `job …` CLI + `.claude/skills/` | 交互式：深聊、改口径、边看边判断 |
-| LangGraph 独立执行 | `job-agent`（`src/job_agent/agent/`，装 `--extra agent`） | 无人值守：一条命令跑完 采集→分诊→审读→投递计划，投递前 interrupt 等人确认 |
+| LangGraph 独立执行 | `job agent`（`src/job_agent/agent/`，装 `--extra agent`） | 无人值守：一条命令跑完 采集→分诊→审读→投递计划，投递前 interrupt 等人确认 |
+
+**入口只有 `job` 一个**（曾经还有个独立的 `job-agent` 脚本，已并成 `job agent`）。
+入口合并不等于代码合并——下面这条铁律照旧。
 
 铁律，`tests/test_boundaries.py` 会强制执行：
 
 - **两条路线代码互不依赖。** `cli/`+`web/` 与 `agent/` 谁也不 import 谁；
   可复用的逻辑一律下沉到共享内核（`core/`、`config/`、`context.py`）。
+  **唯一的豁免是 `cli/commands/agent_cmd.py`**：`job agent` 这个入口总得有人把
+  两边接起来。它只许 import `agent/runner.py` 一个模块，只做「把命令行选项翻成
+  `AgentRunOptions` 再交出去」，一行流程逻辑都不写。豁免按**文件名 + 被 import
+  的模块名**双重钉死，另有一条行数上限——防止它慢慢长成第二份 agent 实现。
+  agent 那边仍然是单向的：`agent/` 永远不许 import `cli/` / `web/`。
 - **agent 路线里 LLM 只出现在判断节点**（`agent/nodes.py` 的 review：读 JD 比
   硬门槛、写投递口径）。采集、分诊、排序、计划渲染全部复用内核或纯函数——
   两条路线跑同一份数据得到同一个 shortlist。
@@ -169,16 +177,16 @@ job -p web3 search        # 任何命令都能 -p 指定
 
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
-job search → job detail → job match → job shortlist → /job-match → job apply
-                       ↘ job web （翻 JD、看库存、点投递）
+job search → job score → job score --shortlist → /job-match → job apply
+          ↘ job web （翻 JD、看库存、点投递）
 
-job-agent [-p <名字>] [--collect] [--apply]   # 同一条流程的无人值守版，
+job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守版，
                                               # 与 CLI 共享同一个 profile 目录
 ```
 
 上面每条命令都接 `-p <名字>`；不带就是默认 profile。
 
-前四步是**确定性**的（可重跑、两次结果一样），`/job-match` 那一步是**判断**
+`job search` 与 `job score` 是**确定性**的（可重跑、两次结果一样），`/job-match` 那一步是**判断**
 （读 JD 比硬门槛、排优先级、写投递口径）。这条分界线就是上面那张表的落地。
 
 对应的配置：
@@ -201,7 +209,7 @@ job-agent [-p <名字>] [--collect] [--apply]   # 同一条流程的无人值守
 ## 还没做的
 
 - 投递之后的事：面试进度、offer 对比、复盘，目前都在系统外
-- `job match` 的信号是关键词命中，读不出「JD 说要 50 人管理经验」这类语义门槛
+- `job score` 的信号是关键词命中，读不出「JD 说要 50 人管理经验」这类语义门槛
   ——这是刻意的，那部分归 `/job-match` skill
 
 ## 硬规则

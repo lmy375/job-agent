@@ -1,7 +1,7 @@
 [project]
 name = "job-agent"
 version = "1.0.0"
-description = "猎聘职位采集、分析、投递与市场报告工具（CLI + Web 管理台）"
+description = "猎聘职位采集、分诊打分与投递工具（CLI + Web 管理台）"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -42,8 +42,6 @@ agent = [
 
 [project.scripts]
 job = "job_agent.cli:main"
-# LangGraph 路线的独立入口，与 job（typer CLI）互不依赖
-job-agent = "job_agent.agent.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

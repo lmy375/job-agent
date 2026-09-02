@@ -54,7 +54,7 @@ def render_shortlist(
     lines: list[str] = [
         f"# 候选岗位清单 · {name} · {date.today().isoformat()}",
         "",
-        f"由 `job shortlist` 生成：共 {len(jobs)} 条进入评分，取前 {len(selected)} 条。",
+        f"由 `job score --shortlist` 生成：共 {len(jobs)} 条进入评分，取前 {len(selected)} 条。",
     ]
     if threshold is not None:
         lines.append(f"筛选门槛：薪资**上限** ≥ {threshold:.0f} 万（按上限而非下限，见下）。")
@@ -142,7 +142,7 @@ def render_shortlist(
         "",
         "## 未进前列但已评分的岗位",
         "",
-        f"共 {max(len(jobs) - len(selected), 0)} 条。跑 `job match --top 50` 看完整排序，",
+        f"共 {max(len(jobs) - len(selected), 0)} 条。跑 `job score --top 50` 看完整排序，",
         "或调 `match.toml` 里的权重后重跑——**分数低不等于不合适**，",
         "只说明它和你配置的信号表重合度低。",
         "",

@@ -34,10 +34,9 @@
 uv sync --extra dev          # 安装依赖
 uv run job config init       # 生成全局配置 config/config.toml（密钥填这里）
 uv run job profile new me    # 建一个 profile（简历、关键词、数据库都在它自己的目录里）
-uv run job search            # 采集职位
-uv run job detail            # 抓 JD
-uv run job match             # 按信号表给职位打分排序（分诊）
-uv run job shortlist         # 生成候选清单骨架
+uv run job search            # 采集职位（搜完自动抓 JD）
+uv run job score             # 按信号表给职位打分排序（分诊）
+uv run job score --shortlist # 生成候选清单骨架
 uv run job web               # 打开 Web 管理台
 ```
 
@@ -55,12 +54,12 @@ uv run job profile use web3  # 把它设成默认，之后不用每次带 -p
 两份配置文件里的注释改，填完 `uv run job config validate` 自检。
 
 采完数据之后**跑 `/job-match`**：它读 JD、比硬门槛、排投递优先级、写投递口径，
-把 `job shortlist` 留白的判断部分填掉。完整流程：
+把 `job score --shortlist` 留白的判断部分填掉。完整流程：
 
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
-job search → job detail → job match → job shortlist → /job-match → job apply
-                       ↘ job web （翻 JD、看库存、点投递）
+job search → job score → job score --shortlist → /job-match → job apply
+          ↘ job web （翻 JD、看库存、点投递）
 ```
 
 ## 目录结构
@@ -75,8 +74,8 @@ profiles/              随人而变的那一半，整个目录不进版本库
     profile.toml       搜索条件、搜索关键词、匹配门槛
     resume.md          你的简历
     preferences.md     求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
-    match.toml         匹配信号表：正负信号 + 权重（决定 job match 的排序）
-    data/              jobs.db、shortlist.md、agent-plan.md
+    match.toml         匹配信号表：正负信号 + 权重（决定 job score 的排序）
+    data/              jobs.db、shortlist.md（job score --shortlist 的产物）、agent-plan.md
 src/job_agent/
   config/              配置加载与校验（TOML → 校验过的 Settings，密钥是 SecretStr）
   core/                核心能力，不依赖 CLI / Web
@@ -94,7 +93,6 @@ src/job_agent/
 frontend/              React（Vite）管理台，构建到 frontend/dist 由后端托管
 scripts/               一次性脚本（导出、关键词覆盖率核对）
 tests/                 pytest（不碰真实库、不发网络请求）
-  shortlist.md         job shortlist 的产物：候选清单（判断部分留白给 skill 填）
 .claude/skills/
   job-init/            `/job-init`：交互式收集信息并填好 config/
   job-match/           `/job-match`：读 JD、比硬门槛、排投递优先级、写投递口径
@@ -103,6 +101,8 @@ tests/                 pytest（不碰真实库、不发网络请求）
 依赖方向单向：`cli` / `web` → `core` → `config`，`agent` → `core` → `config`。
 反向依赖一律禁止；两条执行路线（`cli`+`web` 与 `agent`）互不 import，
 共享的确定性内核只有 `core/` 与 `config/`（`tests/test_boundaries.py` 强制这条边界）。
+唯一的豁免是 `cli/commands/agent_cmd.py`——`job agent` 的入口壳子，只 import
+`agent/runner.py`、只翻选项不写流程；测试按文件名 + 模块名 + 行数上限钉死它。
 
 ## 配置
 
@@ -165,13 +165,11 @@ profile 这一层重复了一遍。想同时跑两条线就开两个 profile
 ## 命令
 
 ```bash
-job search [-k 关键词]... [--pages N] [--dry-run]
-job detail [--limit N] [--retry-failed]
-job match [--floor 万] [--top N] [--why] [--json] [--no-dedupe]
-job shortlist [-o 输出路径] [--limit N] [--floor 万]
+job search [-k 关键词]... [--pages N] [--limit N] [--retry-failed] [--no-detail] [--dry-run]
+job score [--floor 万] [--top N] [--why] [--json] [--shortlist] [--no-dedupe]
 job resume import <文件> [-o 输出路径] [--force]
 job apply <jobId>... [--job-kind 1|2] [--yes]
-job stats [--tracks]
+job stats
 job web [--host H] [--port P] [--no-browser] [--skip-build]
 job profile list|new|use|path
 job config init|show|path [--json]|validate
@@ -192,17 +190,17 @@ skill 与外部脚本靠它定位文件——路径随 profile 变，不该在�
 「职位已结束」）都会记进本地 `applications` 表——**猎聘没有查询投递记录的接口**，
 这张表是唯一的账本。
 
-## 挑岗位：`job match` / `job shortlist` / `/job-match`
+## 挑岗位：`job score` / `/job-match`
 
-采集解决「有哪些岗」，这三样解决「该投哪几个」。分界线是**确定性 vs 判断**：
+采集解决「有哪些岗」，这两样解决「该投哪几个」。分界线是**确定性 vs 判断**：
 
 ```bash
-uv run job match --top 30 --why       # 打分排序，--why 展开命中与扣分理由
-uv run job match --json               # 给脚本用
-uv run job shortlist --limit 12       # 写出 <profile>/data/shortlist.md（判断部分留白）
+uv run job score --top 30 --why       # 打分排序，--why 展开命中与扣分理由
+uv run job score --json               # 给脚本用
+uv run job score --shortlist -n 12    # 写出 <profile>/data/shortlist.md（判断部分留白）
 ```
 
-`job match` 的排序来自当前 profile 的 `match.toml` 信号表，**它是配置不是代码**——
+`job score` 的排序来自当前 profile 的 `match.toml` 信号表，**它是配置不是代码**——
 编码的是「你想要什么」，换个人应当整份重写：
 
 ```toml
@@ -232,13 +230,13 @@ pattern = '预训练|后训练|强化学习|模型训练'
   「这个岗要 50 人管理经验而你带 5 人」这种判断要读 JD，是 `/job-match` 的事。
   第 1 名可能有硬门槛冲突，第 8 名可能才是最该投的。
 
-`job shortlist` 产出的 Markdown 里，每条岗位有三处 `<待 /job-match 填写>`：
+`--shortlist` 产出的 Markdown 里，每条岗位有三处 `<待 /job-match 填写>`：
 **硬门槛核对**、**投不投**、**投递口径**。代码刻意不填——填了模板话术，
 人会以为已经分析过了，比留空更糟。
 
-## 无人值守：`job-agent`（LangGraph 路线）
+## 无人值守：`job agent`（LangGraph 路线）
 
-`/job-match` 是交互式的：你和 Claude 一起读 JD、改口径。`job-agent` 是同一条流程的
+`/job-match` 是交互式的：你和 Claude 一起读 JD、改口径。`job agent` 是同一条流程的
 无人值守版——LangGraph 组的固定管线，一条命令跑完 **分诊 → 逐岗审读 → 投递计划**，
 共享同一个数据库、同一份 `config/`：
 
@@ -246,11 +244,11 @@ pattern = '预训练|后训练|强化学习|模型训练'
 uv sync --extra agent                 # 依赖是可选的，不装不影响 job / job web
 # config/config.toml 的 [agent.providers.*] 里填 api_key（审读节点要调模型 API）
 
-uv run job-agent                      # 用库内已有数据：分诊 → 审读 → <profile>/data/agent-plan.md
-uv run job-agent --collect            # 先采集（search + detail）再走上面的流程
-uv run job-agent --apply              # 出完计划后进入投递确认（终端里逐条拍板）
-uv run job-agent --thread run-x       # 中断后用同一 thread 从 checkpoint 续跑
-uv run job-agent --provider deepseek  # 换模型：用 [agent.providers.deepseek]
+uv run job agent                      # 用库内已有数据：分诊 → 审读 → <profile>/data/agent-plan.md
+uv run job agent --collect            # 先采集（搜索 + 抓 JD）再走上面的流程
+uv run job agent --apply              # 出完计划后进入投递确认（终端里逐条拍板）
+uv run job agent --thread run-x       # 中断后用同一 thread 从 checkpoint 续跑
+uv run job agent --provider deepseek  # 换模型：用 [agent.providers.deepseek]
 ```
 
 ### 审读用哪家模型
@@ -308,7 +306,7 @@ structured_output = "function_calling"
 
 - **LLM 只出现在审读节点**（读 JD 比硬门槛、写投递口径，产出固定 schema 的裁决）。
   采集、去重、打分、排序、计划渲染全部是共享内核里的确定性代码——
-  `job match` 和 `job-agent` 对同一份数据给出同一个 shortlist。
+  `job score` 和 `job agent` 对同一份数据给出同一个 shortlist。
 - **投递前必经 interrupt。** `--apply` 只是打开闸门，真正投哪几个要在终端里
   逐条确认；不传 `--apply` 时流程在写出计划后就结束。
 - **换了模型，产出看得出来**：模型标识（`provider / model`）写进投递计划头部，
@@ -355,6 +353,9 @@ API 文档在 `/docs`。后台任务**只有一个 worker**：猎聘限流按 to
 
 ## 详情页抓取
 
+`job search` 搜完列表就接着抓详情页（`--no-detail` 可以只搜不抓）。
+两半都可重跑：搜索按 jobId 去重，详情按已抓状态跳过，所以被限流打断后直接重跑即可。
+
 JD 来自详情页里的 `<script type="application/ld+json">` **JobPosting** 块——
 猎聘为 SEO 输出的结构化数据，含完整 JD、行业、经验与学历要求，比解析 DOM 稳定得多。
 解析失败时回退到 `data-selector="job-intro-content"`。
@@ -380,7 +381,7 @@ JD 来自详情页里的 `<script type="application/ld+json">` **JobPosting** �
   按下限过滤会误杀「50-80k·20薪」这类实际能谈上去的岗位。
 - **写 `match.toml` 的正则时，英文缩写一定要加 `\b`。** 这是踩过的坑：
   `APT` 不加词边界会命中「C**apt**ion」，`Web\s?3` 会命中「**Web 3D**」。
-  信号表是你自己的配置，没有人替你复核——`job match --why` 打出命中理由就是
+  信号表是你自己的配置，没有人替你复核——`job score --why` 打出命中理由就是
   给你自查用的。
 
 ## 接口限速
@@ -408,7 +409,7 @@ uv run pytest tests/test_matching.py -v
 完整的 `config/` + `data/`，顺便验证了「换一个项目根目录也能跑」。
 
 **数据库不做迁移，接口不做向后兼容**（见 CLAUDE.md 硬规则）：库结构改了就
-`job reset` 删库重建，再 `job search` + `job detail` 重采一遍；接口字段改了就同步改
+`job reset` 删库重建，再 `job search` 重采一遍；接口字段改了就同步改
 `frontend/`。这是个单人工具，数据随时能重新采集，为「万一有老库」写的兼容代码
 只会一直留在仓库里没人敢删。
 

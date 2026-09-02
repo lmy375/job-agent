@@ -1,25 +1,48 @@
-"""LangGraph 路线的独立入口：``job-agent``（或 ``python -m job_agent.agent``）。
+"""LangGraph 路线的运行器：组图、跑图、在投递前停下来等人拍板。
 
-刻意不挂在 ``job``（typer CLI）下面：两条执行路线互不 import，
-这一条只在装了 agent extra 时可用（``uv sync --extra agent``）。
+入口是 ``job agent``（见 ``cli/commands/agent_cmd.py``）——那一层只负责解析选项，
+真正的流程全在这里。**这个模块不 import 任何 ``cli`` / ``web`` 的东西**，
+共享的只有内核（``core/``、``config/``、``context``），边界见 CLAUDE.md。
 
-用法：
-    job-agent                 # 用库内已有数据：分诊 → 审读 → 出投递计划
-    job-agent --collect       # 先采集（search + detail），再走上面的流程
-    job-agent --apply         # 出完计划后进入投递确认（interrupt 等人拍板）
-    job-agent --thread run-x  # 指定运行 ID；断点/中断后用同一 ID 续跑
+依赖是可选的（``uv sync --extra agent``），所以模块级只 import 标准库与内核，
+langgraph 那几个留到 :func:`run` 里面 import——没装 extra 时也能被 CLI 安全导入。
 """
 
 from __future__ import annotations
 
-import argparse
 import os
 import sqlite3
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
-from job_agent.errors import JobAgentError
+from pydantic import BaseModel, ConfigDict
+
+from job_agent.errors import ConfigError, JobAgentError
+
+
+class AgentRunOptions(BaseModel):
+    """一次运行的选项。CLI 那层把命令行参数翻成它，运行器只认这个 model。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: 用哪个 profile（profiles/ 下的目录名）。None = 取 [profiles].default
+    profile: str | None = None
+    #: 全局配置文件路径。None = 自动查找
+    config_file: Path | None = None
+    #: 先采集（等价于 job search：搜索 + 抓 JD），否则直接用库内数据
+    collect: bool = False
+    #: 出完计划后进入投递确认。投递不可撤销，默认不开
+    apply_enabled: bool = False
+    #: 送审岗位数上限，覆盖 [agent].top_n
+    top: int | None = None
+    #: 用哪个模型接入点（[agent.providers.*] 的表名），覆盖 [agent].provider
+    provider: str | None = None
+    #: 覆盖选中接入点的 model（模型 ID）
+    model: str | None = None
+    #: 运行 ID。中断后传同一个可从 checkpoint 续跑
+    thread: str | None = None
 
 
 def _require_agent_extra() -> None:
@@ -32,49 +55,10 @@ def _require_agent_extra() -> None:
         import langgraph
         import langgraph.checkpoint.sqlite  # noqa: F401
     except ImportError as exc:
-        raise SystemExit(
+        raise ConfigError(
             f"agent 路线的依赖未安装（{exc.name}）。\n"
             "  uv sync --extra agent    # 或 pip install 'job-agent[agent]'"
         ) from exc
-
-
-def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="job-agent",
-        description="无人值守跑完 采集 → 分诊 → 审读 JD → 投递计划；投递前必经人工确认。",
-    )
-    parser.add_argument(
-        "--profile",
-        "-p",
-        type=str,
-        default=None,
-        help="用哪个 profile（profiles/ 下的目录名），默认取 [profiles].default",
-    )
-    parser.add_argument(
-        "--config", type=str, default=None, help="全局配置文件路径（默认自动查找）"
-    )
-    parser.add_argument(
-        "--collect", action="store_true", help="先采集（job search + job detail），默认用库内数据"
-    )
-    parser.add_argument(
-        "--apply",
-        action="store_true",
-        help="出完计划后进入投递确认。投递不可撤销，默认不开",
-    )
-    parser.add_argument("--top", type=int, default=None, help="送审岗位数上限，覆盖 [agent].top_n")
-    parser.add_argument(
-        "--provider",
-        type=str,
-        default=None,
-        help="用哪个模型接入点（[agent.providers.*] 的表名），覆盖 [agent].provider",
-    )
-    parser.add_argument(
-        "--model", type=str, default=None, help="覆盖选中接入点的 model（模型 ID）"
-    )
-    parser.add_argument(
-        "--thread", type=str, default=None, help="运行 ID。中断后传同一 ID 从 checkpoint 续跑"
-    )
-    return parser.parse_args(argv)
 
 
 def _read_approval(payload: Any) -> list[int]:
@@ -96,8 +80,8 @@ def _read_approval(payload: Any) -> list[int]:
         return []
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
+def run(options: AgentRunOptions) -> int:
+    """跑完一次 采集 → 分诊 → 审读 → 投递计划（→ 投递确认），返回退出码。"""
     _require_agent_extra()
 
     # 依赖就位后才 import：让上面的报错信息先于 ImportError 出现
@@ -110,28 +94,30 @@ def main(argv: list[str] | None = None) -> int:
     from job_agent.context import AppContext
 
     try:
-        ctx = AppContext.create(profile=args.profile, config_file=args.config)
+        ctx = AppContext.create(
+            profile=options.profile, config_file=options.config_file
+        )
     except JobAgentError as exc:
         print(f"!! {exc}", file=sys.stderr)
         return 2
 
     settings = ctx.settings
-    if args.top is not None:
-        settings.agent.top_n = args.top
-    if args.provider is not None:
+    if options.top is not None:
+        settings.agent.top_n = options.top
+    if options.provider is not None:
         # 赋值不会重跑 model_validator，这里自己挡一下
-        if args.provider not in settings.agent.providers:
+        if options.provider not in settings.agent.providers:
             known = "、".join(sorted(settings.agent.providers))
             print(
-                f"!! --provider {args.provider} 没有对应的 "
-                f"[agent.providers.{args.provider}] 表；已定义的有：{known}",
+                f"!! --provider {options.provider} 没有对应的 "
+                f"[agent.providers.{options.provider}] 表；已定义的有：{known}",
                 file=sys.stderr,
             )
             ctx.close()
             return 2
-        settings.agent.provider = args.provider
-    if args.model is not None:
-        settings.agent.active.model = args.model
+        settings.agent.provider = options.provider
+    if options.model is not None:
+        settings.agent.active.model = options.model
 
     try:
         llm = build_llm(settings)
@@ -154,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
 
     settings.agent.checkpoint.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.agent.checkpoint, check_same_thread=False)
-    thread_id = args.thread or f"run-{time.strftime('%Y%m%d-%H%M%S')}"
+    thread_id = options.thread or f"run-{time.strftime('%Y%m%d-%H%M%S')}"
     app = build_graph(ctx, llm, SqliteSaver(conn, serde=state_serde()))
     config: dict[str, Any] = {
         "configurable": {"thread_id": thread_id},
@@ -163,13 +149,13 @@ def main(argv: list[str] | None = None) -> int:
         "metadata": {"thread_id": thread_id},
     }
 
-    print(f"== job-agent 开始运行（thread={thread_id}，模型={settings.agent.model_label}）==")
+    print(f"== job agent 开始运行（thread={thread_id}，模型={settings.agent.model_label}）==")
     exit_code = 0
     try:
         # 续跑已有 thread 时传 None，从 checkpoint 接着走；新 thread 给初始状态
         state: AgentState | None = None
-        if not (args.thread and app.get_state(config).next):
-            state = AgentState(collect=args.collect, apply_enabled=args.apply)
+        if not (options.thread and app.get_state(config).next):
+            state = AgentState(collect=options.collect, apply_enabled=options.apply_enabled)
         app.invoke(state, config)
 
         # 停在 interrupt（投递确认）时循环等人拍板
@@ -208,7 +194,3 @@ def main(argv: list[str] | None = None) -> int:
         ctx.close()
         conn.close()
     return exit_code
-
-
-if __name__ == "__main__":
-    sys.exit(main())
