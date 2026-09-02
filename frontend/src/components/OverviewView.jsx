@@ -56,8 +56,7 @@ export default function OverviewView() {
                 <Row k="profile 配置" v={config.paths.profileFile} />
                 <Row k="数据库" v={config.paths.database} />
                 <Row k="简历" v={config.paths.resume} />
-                <Row k="匹配信号表" v={config.paths.match} />
-                <Row k="候选清单" v={config.paths.shortlist} />
+                <Row k="求职偏好" v={config.paths.preferences} />
                 <Row
                   k="猎聘账号"
                   v={`${settings.profile.account}（token ${

@@ -5,7 +5,7 @@
 - ``config/config.toml``——全局，管「怎么连」（猎聘账号密钥、限速、模型接入点、
   Web 端口、日志）。所有 profile 共享一份。
 - ``profiles/<name>/profile.toml``——管「找什么」（简历、偏好、搜索条件、
-  匹配门槛）。一个 profile = 一个用户或一种求职场景，
+  打分门槛与匹配信号表）。一个 profile = 一个用户或一种求职场景，
   输入、配置、产物、数据库全在这个目录里，互不可见。
 
 分层规则全部交给 pydantic-settings，这里不写任何解析逻辑：
@@ -55,8 +55,6 @@ _PROFILE_PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("profile", "resume"),
     ("profile", "preferences"),
     ("storage", "database"),
-    ("match", "rules"),
-    ("match", "shortlist_output"),
     ("agent", "checkpoint"),
     ("agent", "plan_output"),
 )
@@ -282,7 +280,7 @@ def load_settings(
             profile=profile_settings.profile,
             search=profile_settings.search,
             storage=profile_settings.storage,
-            match=profile_settings.match,
+            score=profile_settings.score,
         )
     except ValidationError as exc:
         raise ConfigError(_format_validation_error(exc, config_file, frozenset(), "")) from exc

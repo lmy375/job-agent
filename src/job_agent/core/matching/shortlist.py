@@ -49,12 +49,12 @@ def render_shortlist(
     """渲染候选清单 Markdown。``jobs`` 应当已按分数排好序。"""
     selected = list(jobs[:limit])
     name = settings.profile.name or "候选人"
-    threshold = floor_wan if floor_wan is not None else settings.match.salary_floor_wan
+    threshold = floor_wan if floor_wan is not None else settings.score.salary_floor_wan
 
     lines: list[str] = [
         f"# 候选岗位清单 · {name} · {date.today().isoformat()}",
         "",
-        f"由 `job score --shortlist` 生成：共 {len(jobs)} 条进入评分，取前 {len(selected)} 条。",
+        f"由 `job score -o` 生成：共 {len(jobs)} 条进入评分，取前 {len(selected)} 条。",
     ]
     if threshold is not None:
         lines.append(f"筛选门槛：薪资**上限** ≥ {threshold:.0f} 万（按上限而非下限，见下）。")
@@ -142,8 +142,8 @@ def render_shortlist(
         "",
         "## 未进前列但已评分的岗位",
         "",
-        f"共 {max(len(jobs) - len(selected), 0)} 条。跑 `job score --top 50` 看完整排序，",
-        "或调 `match.toml` 里的权重后重跑——**分数低不等于不合适**，",
+        f"共 {max(len(jobs) - len(selected), 0)} 条。跑 `job score -n 50` 看完整排序，",
+        "或调 profile.toml 的 `[score]` 权重后重跑——**分数低不等于不合适**，",
         "只说明它和你配置的信号表重合度低。",
         "",
     ]

@@ -5,7 +5,7 @@
 - ``config/config.toml`` → :class:`GlobalSettings`，管「怎么连」：猎聘账号密钥、
   限速、模型接入点、Web 端口、日志。跟人无关，所有 profile 共享一份。
 - ``profiles/<name>/profile.toml`` → :class:`ProfileSettings`，管「找什么」：
-  简历、求职偏好、搜索条件与关键词、匹配门槛。**随人而变**。
+  简历、求职偏好、搜索条件与关键词、打分门槛与匹配信号表。**随人而变**。
 
 不重叠是刻意的：同一个段要是能出现在两个文件里，下场一定是「改了一个忘了另一个」。
 放错文件时 ``extra="forbid"`` 会当场报错，loader 再按段名告诉你它该在哪个文件里。
@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -192,19 +193,99 @@ class StorageConfig(_Model):
     database: Path = Path("data/jobs.db")
 
 
-class MatchConfig(_Model):
-    """岗位匹配的输入与产物位置。
+#: 正则里出现这些控制字符，几乎一定是 TOML 转义踩坑的结果（见 _check_pattern）
+_CONTROL_CHARS = {
+    "\x08": r"\b（单词边界）",
+    "\x0c": r"\f",
+    "\t": r"\t",
+    "\r": r"\r",
+}
 
-    真正的信号表在 ``rules`` 指向的独立文件里，不在这里——它是一张几十行的
-    数据表，且**随人而变**：对一个做应用工程的人「算法训练岗」是负信号，
-    对一个做算法的人就是正信号。所以它属于 ``config/``，绝不能进代码。
+
+def _check_pattern(value: str) -> str:
+    """校验一条正则：能编译，且没踩 TOML 转义的坑。
+
+    TOML **基本字符串**（双引号）会处理转义，而 ``\b`` 在 TOML 里是合法的
+    「退格符」转义。于是 ``pattern = "\bagent\b"`` 会静默变成
+    ``<退格>agent<退格>``——正则编译得过、一条也匹配不上、排名看着正常但全错。
+    这是最坏的一种 bug：没有任何报错。所以在这里主动拦下来。
+
+    正确写法两种，模板里统一用第二种：
+      · 基本字符串里双写反斜杠：``"\\bagent\\b"``
+      · **TOML 字面量字符串（单引号）**：``'\bagent\b'`` —— 不处理转义，推荐
+    """
+    for char, meant in _CONTROL_CHARS.items():
+        if char in value:
+            raise ValueError(
+                f"正则里出现了控制字符 {char!r}，你大概是想写 {meant}。\n"
+                "  TOML 的双引号字符串会处理转义（\\b = 退格符），"
+                "改用单引号的字面量字符串即可：pattern = '\\bagent\\b'"
+            )
+    try:
+        re.compile(value, re.IGNORECASE)
+    except re.error as exc:
+        raise ValueError(f"不是合法正则：{exc}") from exc
+    return value
+
+
+class Signal(_Model):
+    """一条信号：命中就给 ``weight`` 分。负权重即「减分项 / 排除信号」。"""
+
+    name: str = Field(min_length=1)
+    weight: float
+    pattern: str = Field(min_length=1)
+
+    @field_validator("pattern")
+    @classmethod
+    def _valid(cls, value: str) -> str:
+        return _check_pattern(value)
+
+    @property
+    def regex(self) -> re.Pattern[str]:
+        """编译后的正则。``functools`` 缓存不了实例属性，这里靠调用方复用对象。"""
+        return re.compile(self.pattern, re.IGNORECASE)
+
+
+class RequireRule(_Model):
+    """「完全不对口」的兜底判定。
+
+    职位名与 JD 正文里都找不到 ``pattern``，说明这条岗位连赛道都不对
+    （例：想投 AI，结果是个纯 CRUD 后端），直接扣到排序末尾。
+    没有这道闸，负信号表得穷举所有不想要的方向，永远列不全。
     """
 
-    rules: Path = Path("match.toml")
-    #: `job score --shortlist` 的默认输出位置
-    shortlist_output: Path = Path("data/shortlist.md")
+    pattern: str | None = None
+    penalty: float = -20.0
+
+    @field_validator("pattern")
+    @classmethod
+    def _valid(cls, value: str | None) -> str | None:
+        return None if value is None else _check_pattern(value)
+
+
+class ScoreConfig(_Model):
+    """``[score]`` 段：打分门槛 + 匹配信号表。
+
+    **整段都是「这个人想要什么」，不是通用规则。** 对一个做应用工程的候选人，
+    「预训练 / 强化学习」是负信号；对一个做算法的候选人，同一个词是最强的正信号。
+    所以它住在 profile 里，由 ``/job-init`` 访谈后生成，换人就整段重写。
+
+    刻意和 profile 的其余部分同住一个文件：它曾经是独立的 ``match.toml``，
+    而拆成两个文件唯一的效果是多一处要同步、多一条要解析的路径。
+    """
+
     #: 只看薪资上限不低于这个数的岗位（万元/年，税前口径）。留空表示不过滤
     salary_floor_wan: float | None = Field(default=None, ge=0)
+    #: 标题命中的权重倍数。职位名比 JD 正文更能代表岗位本质，所以默认加倍
+    title_multiplier: float = Field(default=2.0, ge=0)
+    require: RequireRule = Field(default_factory=RequireRule)
+    signals: list[Signal] = Field(default_factory=list)
+
+    @property
+    def require_regex(self) -> re.Pattern[str] | None:
+        if self.require.pattern is None:
+            return None
+        return re.compile(self.require.pattern, re.IGNORECASE)
 
 
 class LangSmithConfig(_Model):
@@ -268,7 +349,7 @@ class AgentConfig(_Model):
 
     这里只放**运行参数与密钥**（跟人无关，所以整张表都在全局
     ``config/config.toml`` 里）。判断的依据（简历、偏好、信号表）来自 profile
-    文件的 ``profile`` 与 ``match``——两条执行路线共享同一份「这个人是谁」。
+    文件的 ``profile`` 与 ``score``——两条执行路线共享同一份「这个人是谁」。
 
     例外要留意：``checkpoint`` 与 ``plan_output`` 虽然写在全局文件里，
     却按**当前 profile 的目录**解析（见 loader 的 ``_PROFILE_PATH_FIELDS``）——
@@ -395,7 +476,7 @@ class ProfileSettings(_FileSettings):
     profile: ProfileConfig = Field(default_factory=ProfileConfig)
     search: SearchConfig = Field(default_factory=SearchConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
-    match: MatchConfig = Field(default_factory=MatchConfig)
+    score: ScoreConfig = Field(default_factory=ScoreConfig)
 
 
 class Settings(BaseModel):
@@ -430,7 +511,7 @@ class Settings(BaseModel):
     profile: ProfileConfig
     search: SearchConfig
     storage: StorageConfig
-    match: MatchConfig
+    score: ScoreConfig
 
     @model_validator(mode="after")
     def _account_must_exist(self) -> Settings:
@@ -471,8 +552,6 @@ class Settings(BaseModel):
             database=self.storage.database,
             resume=self.profile.resume,
             preferences=self.profile.preferences,
-            match=self.match.rules,
-            shortlist=self.match.shortlist_output,
         )
 
 
@@ -493,5 +572,3 @@ class ConfigPaths(_Model):
     database: Path
     resume: Path
     preferences: Path
-    match: Path
-    shortlist: Path

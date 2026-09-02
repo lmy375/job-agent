@@ -5,8 +5,8 @@
 按文件名把这条豁免钉死）——这里做的只有「把命令行选项翻成
 :class:`AgentRunOptions`」，一行流程逻辑都不写。
 
-import 放在函数体里，因为 agent 的依赖是可选的：没装 ``--extra agent`` 的人
-跑 ``job search`` / ``job score`` 不该被 langgraph 的 ImportError 挡住。
+import 放在函数体里是为了启动速度：``runner`` 会连带拉起 langgraph，
+而 ``job search`` / ``job score`` 用不到它，不该让每次敲 ``job`` 都等它加载。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import Annotated
 
 import typer
 
+from job_agent.cli.help import h
 from job_agent.cli.state import CliState
 
 
@@ -28,11 +29,11 @@ def agent(
         typer.Option("--apply", help="出完计划后进入投递确认。投递不可撤销，默认不开。"),
     ] = False,
     top: Annotated[
-        int | None, typer.Option("--top", "-n", help="送审岗位数上限，覆盖 [agent].top_n。")
+        int | None, typer.Option("-n", help=h("送审岗位数上限，覆盖 [agent].top_n。"))
     ] = None,
     provider: Annotated[
         str | None,
-        typer.Option("--provider", help="用哪个模型接入点（[agent.providers.*] 的表名）。"),
+        typer.Option("--provider", help=h("用哪个模型接入点（[agent.providers.*] 的表名）。")),
     ] = None,
     model: Annotated[
         str | None, typer.Option("--model", help="覆盖选中接入点的 model（模型 ID）。")

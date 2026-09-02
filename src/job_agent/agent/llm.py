@@ -74,7 +74,7 @@ def build_llm(settings: Settings) -> Any:
         raise ConfigError(
             f"{settings.agent.model_label} 走 {provider.api} 协议，"
             f"需要 {package}（缺 {exc.name}）。\n"
-            f"  uv sync --extra agent    # 或 pip install {package}"
+            f"  uv sync    # 重新装齐依赖；或 pip install {package}"
         ) from exc
 
 

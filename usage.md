@@ -52,7 +52,7 @@
 **只负责有唯一正确答案的事**：采集、限流退避、去重、JD 解析、薪资换算、
 按信号表打分排序。同一个库跑两次，结论必须一模一样。
 
-反过来说，**CLI 刻意不下结论**。`job score --shortlist` 生成的清单里，
+反过来说，**CLI 刻意不下结论**。`job score -o` 生成的清单里，
 「硬门槛核对 / 投不投 / 投递口径」三处留白写着 `<待 /job-match 填写>`——
 不是没做完，是故意的：填一段模板话术，人会误以为已经分析过了，比留空更糟。
 
@@ -62,8 +62,8 @@
 
 ```bash
 uv run job search        # 按关键词批量搜（按 jobId 去重），搜完接着抓 JD
-uv run job score --top 30 --why    # 打分排序，--why 展开命中与扣分理由
-uv run job score --shortlist -n 12 # 写出候选清单骨架
+uv run job score -n 30 --why       # 打分排序，--why 展开命中与扣分理由
+uv run job score -n 12 -o data/shortlist.md   # 写出候选清单骨架
 ```
 
 首次使用多两步：
@@ -80,9 +80,9 @@ uv run job profile new me      # 建 profile（简历、关键词、库都在它
   进度直接落库，中断后重跑自动跳过已完成项——所以放着跑就行。
 - **`job score --why` 是用来体检信号表的，不是用来看排名的。**
   扫一遍命中理由：该进的没进 → 缺正信号；不该进的排很高 → 缺负信号。
-  发现问题**改 profile 的 `match.toml` 再重跑**，别在脑子里手工纠偏——
+  发现问题**改 profile.toml 的 `[score]` 再重跑**，别在脑子里手工纠偏——
   手工纠偏这次能用，下次跑又是老样子。
-- **`match.toml` 里的正则一律用单引号**（TOML 字面量字符串）。
+- **`[score]` 里的正则一律用单引号**（TOML 字面量字符串）。
   双引号里 `\b` 是退格符转义，`"\bagent\b"` 会静默变成匹配不上任何东西的正则。
   `job config validate` 会拦，但别指望它。
 - **别在别处硬编码路径。** 路径随 profile 变，一律问：
@@ -96,7 +96,7 @@ uv run job profile new me      # 建 profile（简历、关键词、库都在它
 
 ### 不要用 CLI 做的事
 
-写一次性打分脚本。要改排序就改 `match.toml`——那才能跨会话复用；
+写一次性打分脚本。要改排序就改 `[score]` 信号表——那才能跨会话复用；
 脚本用完就丢，第二次跑得到的是一份不可比的新结论，等于没有系统。
 
 ---
@@ -127,7 +127,7 @@ uv run job profile new me      # 建 profile（简历、关键词、库都在它
 
 **采完数据之后的默认下一步**，也是四条路径里最该常用的一条。
 它做 CLI 做不了的事：逐条读 JD 比硬门槛、判断投不投、排优先级、写投递口径，
-把 `job score --shortlist` 留白的三处填掉。
+把 `job score -o` 留白的三处填掉。
 
 典型对话：
 
@@ -145,10 +145,10 @@ Claude：（修正硬门槛核对，重排优先级）
 
 - **它不投递。** `job apply` 不可撤销，除非你明确要求，skill 绝不会跑。
 - **它把判断写进 `data/shortlist.md`**，不碰 `resume.md` / `preferences.md` /
-  `match.toml`——那三个是你的输入，不是它的产出。
+  `profile.toml` 的 `[score]`——那些是你的输入，不是它的产出。
 - **一份健康的清单里「不投」应该占不小比例。** 12 条全判「投」说明它没在判断，
   这时候该追问它每条的理由。
-- 排序不对就让它改 `match.toml`，别接受「我在分析里帮你调整了」这种回答。
+- 排序不对就让它改 `[score]` 信号表，别接受「我在分析里帮你调整了」这种回答。
 
 ---
 
@@ -159,12 +159,8 @@ Claude：（修正硬门槛核对，重排优先级）
 
 ### 前置
 
-依赖是可选的，不装不影响 `job` 与 `job web`：
-
-```bash
-uv sync --extra agent
-# 再在 config/config.toml 的 [agent.providers.*] 里填 api_key（审读节点要调模型）
-```
+依赖跟着 `uv sync` 一起装（不是可选 extra），所以只剩一件事要做：
+在 `config/config.toml` 的 `[agent.providers.*]` 里填 `api_key`——审读节点要调模型。
 
 ### 推荐用法
 
@@ -200,7 +196,7 @@ uv run job agent --apply              # 出完计划后进入投递确认（终�
 
 ### 什么时候别用 agent
 
-**第一次挑岗位别用。** 头一轮你的 `match.toml` 和 `preferences.md` 大概率还不准，
+**第一次挑岗位别用。** 头一轮你的 `[score]` 信号表和 `preferences.md` 大概率还不准，
 需要在对话里来回校准——那是 `/job-match` 的主场。等口径稳定了、
 你只是想定期扫一遍新岗位，再换到 agent。
 
@@ -249,14 +245,14 @@ API 文档在 `/docs`。前端开发：`cd frontend && npm run dev`（5173，`/a
           job web                         先翻一遍库存，对市场有个体感
 
 第 2 天   /job-match                      逐条读 JD、排优先级、写口径
-                                          ↑ 这一步会顺手校准 match.toml
+                                          ↑ 这一步会顺手校准 [score] 信号表
           job apply <id>...               或在 Web 上点投递
 
 之后      job agent --collect             口径稳定后，定期无人值守扫新岗
           job web                         翻新出现的 JD
 ```
 
-会重复的只有最后两行。**前两天的产出（`match.toml`、`resume.md`、
+会重复的只有最后两行。**前两天的产出（`profile.toml` 的 `[score]`、`resume.md`、
 `preferences.md`）是可以跨会话复用的资产**——求职是低频行为，
 如果每次都从零现算，第二次得到的是一份不可比的新结论，等于没有系统。
 
@@ -275,7 +271,7 @@ uv run job profile use web3       # 设为默认，之后不用每次带 -p
 在 Claude Code 里跑 `/job-init` 时告诉它「新开一个 web3 方向」即可。
 
 - **换人只需要换 profile，不该改代码。** 「AI Agent 是好岗位」这类个人取向
-  一旦出现在 `src/` 里就是 bug——它属于 `match.toml`。
+  一旦出现在 `src/` 里就是 bug——它属于 `[score]` 信号表。
   做算法的人把「预训练」那条从 `-12` 改成 `+12` 就行。
 - **猎聘 token 仍然只有全局一处落盘**：住 `[liepin.accounts.<名字>]`，
   profile 用 `[profile].account` 指一个。几个人的 token 可以长期并存。
@@ -287,7 +283,7 @@ uv run job profile use web3       # 设为默认，之后不用每次带 -p
 ## 常见问题
 
 **采完了但 `job score` 一条都排不上来？**
-多半是 `[require].pattern` 写窄了，或 `match.salary_floor_wan` 门槛太高。
+多半是 `[score.require].pattern` 写窄了，或 `[score].salary_floor_wan` 门槛太高。
 跑 `job score --why` 看扣分理由。注意薪资门槛过滤的是 JD 区间的**上限**
 （那才代表「这家最多给到多少」），不是下限。
 

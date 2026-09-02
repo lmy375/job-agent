@@ -22,7 +22,7 @@ def stats(ctx: typer.Context) -> None:
     total = context.jobs.count()
     details = context.details.status_counts()
     applications = context.applications.status_counts()
-    floor = settings.match.salary_floor_wan
+    floor = settings.score.salary_floor_wan
     salary = context.jobs.salary_summary(floor_wan=floor)
 
     typer.secho(f"数据库：{settings.storage.database}", bold=True)
@@ -37,7 +37,7 @@ def stats(ctx: typer.Context) -> None:
     else:
         typer.echo(
             f"  薪资可解析      {salary.parsed}  平均上限 {salary.avgHighWan} 万"
-            "（[match].salary_floor_wan 没配，不报达标比例）"
+            "（[score].salary_floor_wan 没配，不报达标比例）"
         )
 
     typer.secho("\n按搜索关键词", bold=True)

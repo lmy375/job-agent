@@ -17,6 +17,7 @@ from job_agent.cli.commands import (
     stats_cmd,
     web_cmd,
 )
+from job_agent.cli.help import h
 
 
 def register(app: typer.Typer) -> None:
@@ -25,7 +26,7 @@ def register(app: typer.Typer) -> None:
     )(search_cmd.search)
     app.command(
         "score",
-        help="按 match.toml 信号表打分排序（分诊）；--shortlist 写出候选清单骨架。",
+        help=h("按 profile.toml 的 [score] 信号表打分排序（分诊）；-o 写出候选清单骨架。"),
     )(score_cmd.score)
     app.command("apply", help="投递职位（可传多个 jobId）。")(apply_cmd.apply)
     app.command(

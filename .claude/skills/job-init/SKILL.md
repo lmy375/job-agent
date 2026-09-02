@@ -25,7 +25,8 @@ description: 交互式初始化 job-agent 的某个 profile——选定或新建
 uv run job -p <名字> config path --json
 ```
 
-它输出 `profileDir` / `resume` / `preferences` / `match` / `database` 等绝对路径。
+它输出 `profileDir` / `profileFile` / `resume` / `preferences` / `database` 等绝对路径。
+信号表没有单独的路径——它是 `profileFile`（profile.toml）里的 `[score]` 段。
 后面每一步要写文件时都用这里给出的路径。
 
 ## 开场：先确定用哪个 profile
@@ -58,7 +59,7 @@ uv run job -p <名字> config validate      # 缺什么
 ```bash
 uv run job config init            # 全局配置（只在第一次需要）
 uv run job profile new <名字>      # profile 骨架：profile.toml、resume.md、
-                                  # preferences.md、match.toml、data/
+                                  # preferences.md、data/
 ```
 
 两个命令都不会覆盖已存在的东西。
@@ -153,7 +154,7 @@ uv run job search --dry-run
 薪资那一栏**统一按税前填写**（JD 标的就是税前，本项目不做税后换算）。
 用户如果报的是税后数字，让他换成税前再填，别替他换算。另外问清现金与期权的构成。
 
-## 第 7 步：匹配信号表（profile 目录下的 `match.toml`）
+## 第 7 步：匹配信号表（profile.toml 的 `[score]` 段）
 
 **这一步别跳过。** 缺了它 `job score` 跑不了，
 用户就只能停在「一堆数据」而到不了「该投哪几个岗」。
@@ -163,29 +164,29 @@ uv run job search --dry-run
 
 | 信号表里的 | 从哪来 |
 | --- | --- |
-| `[require].pattern` | 用户说的目标方向（第 4 步的关键词） |
-| 正信号（weight > 0） | `resume.md` 里真实做过的技术栈 + 想做的方向 |
-| 负信号（weight < 0） | `preferences.md` 的「不看的岗位」 |
+| `[score.require].pattern` | 用户说的目标方向（第 4 步的关键词） |
+| `[[score.signals]]` 正信号（weight > 0） | `resume.md` 里真实做过的技术栈 + 想做的方向 |
+| `[[score.signals]]` 负信号（weight < 0） | `preferences.md` 的「不看的岗位」 |
 
 三条硬规则：
 
 - **正则一律用单引号**（TOML 字面量字符串）：`pattern = '\bagent\b'`。
   双引号里 `\b` 是 TOML 的「退格符」转义，会静默变成 `<退格>agent<退格>`——
   正则编译得过、一条也匹配不上、排名看着正常但全错。
-  （`job config validate` 会拦，但别依赖它。）
-- **负信号要显式写**，不能指望 `[require]` 兜。不想要的方向往往同时带强正信号
+  （读配置时会拦下来，但别依赖它。）
+- **负信号要显式写**，不能指望 `[score.require]` 兜。不想要的方向往往同时带强正信号
   （「大模型预训练」里有「大模型」），不扣分会排到很前面。
 - **权重标准**：命中这条我会不会想点开看看。10 = 看到就想投，
   6–8 = 明显加分，3–5 = 技术栈对得上，1–2 = 有点关系。
 
-顺手把 `[match]` 的 `salary_floor_wan` 定下来（万元/年，**税前**）：
+顺手把 `[score]` 的 `salary_floor_wan` 定下来（万元/年，**税前**）：
 它比目标包裹低一档，理由同第 3 步。
 
 写完验证一遍——这一步能立刻看出信号表准不准：
 
 ```bash
 uv run job -p <名字> config validate
-uv run job -p <名字> score --top 15 --why      # 库里已有数据时
+uv run job -p <名字> score -n 15 --why        # 库里已有数据时
 ```
 
 ## 第 8 步：自检并交代下一步
@@ -199,7 +200,7 @@ uv run job -p <名字> search -k "<某个关键词>" --pages 1 --no-detail   # �
 然后告诉用户完整流程：
 
 ```
-job search → job score → job score --shortlist → /job-match → job apply
+job search → job score → job score -o → /job-match → job apply
           ↘ job web （翻 JD、看库存、点投递）
 ```
 

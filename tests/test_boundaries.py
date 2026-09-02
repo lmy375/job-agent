@@ -91,6 +91,34 @@ def test_bridge_stays_thin() -> None:
     )
 
 
+def test_help_text_escapes_toml_sections() -> None:
+    """帮助文本里的方括号必须转义（``cli/help.py`` 的 ``h()``）。
+
+    typer 用 rich 渲染 --help，rich 把 ``[...]`` 当标记语言吃掉——
+    「默认取 [profiles].default」会安静地显示成「默认取 .default」。
+    不报错、不留痕，所以只能靠测试拦。
+    """
+    offenders: list[str] = []
+    for file in sorted((SRC / "cli").rglob("*.py")):
+        tree = ast.parse(file.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                # 只看写成字面量的 help=；套了 h(...) 的是 ast.Call，本来就跳过
+                if kw.arg != "help" or not isinstance(kw.value, ast.Constant):
+                    continue
+                if isinstance(kw.value.value, str) and "[" in kw.value.value:
+                    offenders.append(
+                        f"{file.relative_to(SRC.parent)}:{kw.value.lineno} -> {kw.value.value}"
+                    )
+    assert not offenders, (
+        "帮助文本里有没转义的方括号，rich 渲染 --help 时会把它连内容一起吃掉。\n"
+        "用 job_agent.cli.help.h() 裹一层：help=h(\"…默认取 [profiles].default。\")\n"
+        + "\n".join(offenders)
+    )
+
+
 #: 结构体只许用 pydantic：这几个名字出现即违规
 BANNED_STRUCT_DECORATORS = ("dataclass", "dataclasses.dataclass")
 BANNED_STRUCT_BASES = ("NamedTuple", "typing.NamedTuple")

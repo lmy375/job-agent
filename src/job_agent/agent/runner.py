@@ -4,8 +4,8 @@
 真正的流程全在这里。**这个模块不 import 任何 ``cli`` / ``web`` 的东西**，
 共享的只有内核（``core/``、``config/``、``context``），边界见 CLAUDE.md。
 
-依赖是可选的（``uv sync --extra agent``），所以模块级只 import 标准库与内核，
-langgraph 那几个留到 :func:`run` 里面 import——没装 extra 时也能被 CLI 安全导入。
+langgraph 那几个刻意留在 :func:`run` 里面 import：它们加载得不快，
+而 ``job search`` / ``job score`` 根本用不到——不该让每次敲 ``job`` 都等它们。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from job_agent.errors import ConfigError, JobAgentError
+from job_agent.errors import JobAgentError
 
 
 class AgentRunOptions(BaseModel):
@@ -45,22 +45,6 @@ class AgentRunOptions(BaseModel):
     thread: str | None = None
 
 
-def _require_agent_extra() -> None:
-    """只检查组图与 checkpoint 的依赖。
-
-    模型客户端（langchain-anthropic / langchain-openai）按选中的 provider
-    才需要，缺哪个由 llm.build_llm 报——它知道当前选的是谁。
-    """
-    try:
-        import langgraph
-        import langgraph.checkpoint.sqlite  # noqa: F401
-    except ImportError as exc:
-        raise ConfigError(
-            f"agent 路线的依赖未安装（{exc.name}）。\n"
-            "  uv sync --extra agent    # 或 pip install 'job-agent[agent]'"
-        ) from exc
-
-
 def _read_approval(payload: Any) -> list[int]:
     """终端里等人拍板（``payload`` 是 ConfirmRequest，从 checkpoint 反序列化而来）。
 
@@ -82,9 +66,7 @@ def _read_approval(payload: Any) -> list[int]:
 
 def run(options: AgentRunOptions) -> int:
     """跑完一次 采集 → 分诊 → 审读 → 投递计划（→ 投递确认），返回退出码。"""
-    _require_agent_extra()
-
-    # 依赖就位后才 import：让上面的报错信息先于 ImportError 出现
+    # 延迟到这里 import：langgraph 加载不快，不该拖慢每一次 `job` 调用
     from langgraph.checkpoint.sqlite import SqliteSaver
     from langgraph.types import Command
 

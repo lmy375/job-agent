@@ -108,7 +108,7 @@ def test_profile_new_copies_templates_and_sets_default(fresh_root):
     assert runner.invoke(app, ["config", "init"]).exit_code == 0
     result = runner.invoke(app, ["profile", "new", "me"])
     assert result.exit_code == 0
-    for name in ("profile.toml", "resume.md", "preferences.md", "match.toml"):
+    for name in ("profile.toml", "resume.md", "preferences.md"):
         assert (fresh_root / "profiles" / "me" / name).is_file(), name
     assert (fresh_root / "profiles" / "me" / "data").is_dir()
     # 第一个 profile 自动成为默认，不带 --profile 也能跑
@@ -139,7 +139,7 @@ def test_profiles_are_isolated(fresh_root):
         paths[name] = json.loads(result.stdout)
 
     assert paths["a"]["database"] != paths["b"]["database"]
-    for key in ("database", "resume", "match", "shortlist"):
+    for key in ("database", "resume", "preferences"):
         assert "profiles/a" in paths["a"][key], key
         assert "profiles/b" in paths["b"][key], key
 
@@ -195,23 +195,6 @@ def test_search_fetches_details_afterwards(config_path, fake_collect):
 def test_search_no_detail_stops_after_search(config_path, fake_collect):
     assert run(config_path, "search", "--no-detail").exit_code == 0
     assert fake_collect == ["search"]
-
-
-def test_agent_without_extra_reports_missing_dependency(config_path, monkeypatch):
-    """没装 --extra agent 时，`job agent` 要给出装依赖的办法，而不是 ImportError。"""
-    import builtins
-
-    real_import = builtins.__import__
-
-    def fake_import(name, *args, **kwargs):
-        if name.startswith("langgraph"):
-            raise ImportError(name=name)
-        return real_import(name, *args, **kwargs)
-
-    monkeypatch.setattr(builtins, "__import__", fake_import)
-    result = run(config_path, "agent")
-    assert result.exit_code == 2
-    assert "--extra agent" in result.stderr
 
 
 def test_db_info(config_path):
@@ -355,50 +338,66 @@ def test_score_floor_filters(config_path, context):
     assert "门槛太高" in result.stdout
 
 
-def test_score_missing_rules_file(config_path, profile_dir, context):
+def test_score_without_signals_exits_with_config_error(config_path, profile_dir, context):
+    """[score] 段里没有信号 = 全 0 分的排名，看着像成功——必须拦。"""
     seed_agent_job(context)
-    (profile_dir / "match.toml").unlink()
+    body = (profile_dir / "profile.toml").read_text(encoding="utf-8")
+    (profile_dir / "profile.toml").write_text(
+        body[: body.index("[score]")] + "[score]\n", encoding="utf-8"
+    )
     result = run(config_path, "score")
     assert result.exit_code == 2
-    assert "匹配信号表不存在" in result.stderr
+    assert "[[score.signals]]" in result.stdout
 
 
-def test_score_shortlist_writes_file(config_path, profile_dir, context):
+def test_score_output_writes_shortlist(config_path, context, tmp_path):
     seed_agent_job(context)
-    result = run(config_path, "score", "--shortlist")
+    target = tmp_path / "out" / "shortlist.md"
+    result = run(config_path, "score", "-o", str(target))
     assert result.exit_code == 0
-    target = profile_dir / "data" / "shortlist.md"
     assert target.is_file()
     body = target.read_text(encoding="utf-8")
     assert "Agent 平台工程师" in body
     assert "<待 /job-match 填写>" in body
 
 
-def test_score_shortlist_without_data_exits_nonzero(config_path):
-    result = run(config_path, "score", "--shortlist")
+def test_score_output_relative_lands_in_profile(config_path, profile_dir, context):
+    """-o 的相对路径按 profile 目录解析：产物跟着 profile 走，两个 profile 不互相覆盖。"""
+    seed_agent_job(context)
+    assert run(config_path, "score", "-o", "data/shortlist.md").exit_code == 0
+    assert (profile_dir / "data" / "shortlist.md").is_file()
+
+
+def test_score_output_with_json_writes_json(config_path, context, tmp_path):
+    """-o 决定「写文件」，--json 决定「什么格式」——两个维度正交。"""
+    import json
+
+    seed_agent_job(context)
+    target = tmp_path / "out.json"
+    assert run(config_path, "score", "--json", "-o", str(target)).exit_code == 0
+    assert json.loads(target.read_text(encoding="utf-8"))[0]["jobId"] == 1
+
+
+def test_score_output_without_data_exits_nonzero(config_path, tmp_path):
+    result = run(config_path, "score", "-o", str(tmp_path / "x.md"))
     assert result.exit_code == 1
 
 
-def test_score_rejects_two_output_forms(config_path, context):
-    seed_agent_job(context)
-    result = run(config_path, "score", "--json", "--shortlist")
-    assert result.exit_code != 0
-
-
-def test_config_validate_reports_bad_match_rules(config_path, profile_dir):
-    """信号表里的正则写错，validate 就该报出来，而不是等 job score 炸。"""
-    (profile_dir / "match.toml").write_text(
-        '[[signals]]\nname="x"\nweight=1\npattern="([unclosed"\n', encoding="utf-8"
+def test_config_validate_reports_missing_signals(config_path, profile_dir):
+    """信号表空着，validate 就该报出来，而不是等 job score 排出一堆 0 分。"""
+    body = (profile_dir / "profile.toml").read_text(encoding="utf-8")
+    (profile_dir / "profile.toml").write_text(
+        body[: body.index("[score]")], encoding="utf-8"
     )
     result = run(config_path, "config", "validate")
     assert result.exit_code == 2
-    assert "校验失败" in result.stdout
+    assert "[[score.signals]]" in result.stdout
 
 
-def test_config_path_includes_match(config_path):
+def test_config_path_lists_profile_inputs(config_path):
     result = run(config_path, "config", "path")
-    assert "match" in result.stdout
-    assert "shortlist" in result.stdout
+    assert "resume" in result.stdout
+    assert "database" in result.stdout
 
 
 # ---------------------------------------------------------------- resume import

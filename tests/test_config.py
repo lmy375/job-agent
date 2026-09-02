@@ -40,7 +40,7 @@ def test_paths_resolved_against_profile_dir(settings, profile_dir, project_root)
     assert settings.storage.database == profile_dir / "data" / "test.db"
     assert settings.profile.resume == profile_dir / "resume.md"
     assert settings.profile.preferences == profile_dir / "preferences.md"
-    assert settings.match.rules == profile_dir / "match.toml"
+    assert settings.profile.preferences == profile_dir / "preferences.md"
     assert settings.storage.database.is_absolute()
 
 

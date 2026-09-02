@@ -78,6 +78,12 @@ def cancel_task(tasks: TasksDep, task_id: str) -> TaskResponse:
 def _search_runner(
     payload: CreateTaskRequest, context: AppContext, manager: TaskManager
 ) -> Callable[[Task], TaskResult]:
+    """搜索；``params.fetch_detail`` 为真（默认）时在同一个任务里接着抓 JD。
+
+    合在一个任务里而不是自动排第二个任务：这样「搜完自动抓」是原子的——
+    取消一次就全停，进度条也不会中途跳成另一条任务。
+    """
+
     def run(task: Task) -> TaskResult:
         with context.client() as client:
             service = SearchService(
@@ -90,11 +96,17 @@ def _search_runner(
             )
         if summary.aborted and not task.cancelRequested:
             raise RuntimeError(summary.aborted_reason or "搜索中止")
+
+        detail = None
+        if payload.params.fetch_detail and not task.cancelRequested:
+            detail = _fetch_details(payload, context, manager, task)
+
         return SearchTaskResult(
             totalFound=summary.total_found,
             totalNew=summary.total_new,
             keywords=[SearchKeywordResult.model_validate(r) for r in summary.results],
             remaining=summary.remaining,
+            detail=detail,
         )
 
     return run
@@ -104,29 +116,36 @@ def _detail_runner(
     payload: CreateTaskRequest, context: AppContext, manager: TaskManager
 ) -> Callable[[Task], TaskResult]:
     def run(task: Task) -> TaskResult:
-        service = DetailService(
-            context.settings,
-            context.jobs,
-            context.details,
-            on_progress=manager.progress_hook(task),
-        )
-        try:
-            summary = service.run(
-                limit=payload.params.limit,
-                retry_failed=payload.params.retry_failed,
-                stop_check=lambda: task.cancelRequested,
-            )
-        finally:
-            service.close()
-        return DetailTaskResult(
-            total=summary.total,
-            fetched=summary.fetched,
-            statuses=dict(summary.statuses),
-            elapsedSeconds=round(summary.elapsed, 1),
-            abortedReason=summary.aborted_reason,
-        )
+        return _fetch_details(payload, context, manager, task)
 
     return run
+
+
+def _fetch_details(
+    payload: CreateTaskRequest, context: AppContext, manager: TaskManager, task: Task
+) -> DetailTaskResult:
+    """抓 JD。search 与 detail 两种任务共用，保证两条路的行为完全一致。"""
+    service = DetailService(
+        context.settings,
+        context.jobs,
+        context.details,
+        on_progress=manager.progress_hook(task),
+    )
+    try:
+        summary = service.run(
+            limit=payload.params.limit,
+            retry_failed=payload.params.retry_failed,
+            stop_check=lambda: task.cancelRequested,
+        )
+    finally:
+        service.close()
+    return DetailTaskResult(
+        total=summary.total,
+        fetched=summary.fetched,
+        statuses=dict(summary.statuses),
+        elapsedSeconds=round(summary.elapsed, 1),
+        abortedReason=summary.aborted_reason,
+    )
 
 
 _RUNNERS = {

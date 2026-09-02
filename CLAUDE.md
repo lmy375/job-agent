@@ -50,14 +50,14 @@
 | 按 JD 正文去重、保留标价最高的那条 | 「这条属于哪个赛道」 |
 | 薪资文案 → 年薪区间（万元，税前） | 「这个赛道薪资中位数多少」 |
 | 库存计数（多少职位、多少 JD、投了多少） | 「哪个方向在涨」 |
-| 按 `match.toml` 信号表打分排序（信号表是**用户的**配置） | 「JD 里提到哪些技能、占比多少」 |
+| 按 `[score]` 信号表打分排序（信号表是**用户的**配置） | 「JD 里提到哪些技能、占比多少」 |
 
 判据很简单：**结论会不会因为换个人就该重写？** 会 → 不进 `src/`。
-（打分排序看似是分析，但它读的是用户自己写的 `match.toml`，
+（打分排序看似是分析，但它读的是用户自己写的 `[score]` 信号表，
 代码里只有「按正则命中加权重、按分数排序」这一条通用规则，没有任何取向。）
 
 顺带一条：`salary_summary()` 这类统计**不许写死门槛**。「多少算达标」由调用方
-从 profile 传进来（`[match].salary_floor_wan`），没配就不报达标比例——
+从 profile 传进来（`[score].salary_floor_wan`），没配就不报达标比例——
 不要假装有个客观的达标线。
 
 ## 为什么是 CLI + skill，不是 SDK
@@ -75,7 +75,7 @@ CLI 把稳定的骨架固化下来，skill 把「怎么判断」的经验固化�
 | 路线 | 入口 | 适用 |
 | --- | --- | --- |
 | skill + Claude Code | `job …` CLI + `.claude/skills/` | 交互式：深聊、改口径、边看边判断 |
-| LangGraph 独立执行 | `job agent`（`src/job_agent/agent/`，装 `--extra agent`） | 无人值守：一条命令跑完 采集→分诊→审读→投递计划，投递前 interrupt 等人确认 |
+| LangGraph 独立执行 | `job agent`（`src/job_agent/agent/`） | 无人值守：一条命令跑完 采集→分诊→审读→投递计划，投递前 interrupt 等人确认 |
 
 **入口只有 `job` 一个**（曾经还有个独立的 `job-agent` 脚本，已并成 `job agent`）。
 入口合并不等于代码合并——下面这条铁律照旧。
@@ -124,8 +124,8 @@ config/
   templates/           # 新建 profile 的模板，整份 copytree 过去
 profiles/              # 整个目录不进版本库
   default/
-    profile.toml       # 搜索条件与关键词、match 门槛
-    resume.md  preferences.md  match.toml
+    profile.toml       # 搜索条件与关键词、[score] 打分门槛与信号表
+    resume.md  preferences.md
     data/              # jobs.db、shortlist.md、agent-plan.md
   web3/
     ...
@@ -136,7 +136,7 @@ profiles/              # 整个目录不进版本库
 | 文件 | 段 | 一句话 |
 | --- | --- | --- |
 | `config/config.toml` | `[profiles]`、`[liepin]`（含 `[liepin.accounts.*]`）、`[detail]`、`[agent]`（含 `.providers.*` / `.langsmith`）、`[web]`、`[logging]` | 管**怎么连**，跟人无关 |
-| `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[match]` | 管**找什么**，随人而变 |
+| `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[score]` | 管**找什么**，随人而变 |
 
 不重叠是刻意的，也是硬约束（`tests/test_boundaries.py` 会强制）：同一个段要是能出现在
 两个文件里，下场一定是「改了一个忘了另一个」。放错文件时 `extra="forbid"` 会当场报错，
@@ -157,6 +157,10 @@ loader 再按段名告诉你它该在哪个文件里。段不重叠还保证了�
   那个名字会被 pydantic-settings 当成给 `[profile]` 整段赋 JSON。）
 - **代码里不出现任何 profile 名字，也不拼 `data/jobs.db` 这类路径**——
   一律问 `settings`。skill 与外部脚本用 `job config path --json`。
+- **profile 内部不要再多层文件。** 信号表、搜索关键词、门槛都在 `profile.toml`
+  的段里；`profile.toml` / `resume.md` / `preferences.md` 三个文件的分界是
+  **格式**（结构化 TOML vs 自由 Markdown），不是话题。加一段配置就加个段，
+  不要再开第四个文件。
 - **profile 内部不要再按方向分层。** `[search].keywords` 是扁平数组，
   不是「按赛道分组的关键词表」——想同时跑两条线就开两个 profile。
   曾经有过 `[[search.groups]]`（带 `track` 标签与 `enabled` 开关），
@@ -177,7 +181,7 @@ job -p web3 search        # 任何命令都能 -p 指定
 
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
-job search → job score → job score --shortlist → /job-match → job apply
+job search → job score → job score -o → /job-match → job apply
           ↘ job web （翻 JD、看库存、点投递）
 
 job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守版，
@@ -194,17 +198,22 @@ job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守
 | 文件 | 管什么 | 谁生成 |
 | --- | --- | --- |
 | `config/config.toml` | 猎聘账号密钥、限速、模型接入点、Web、日志 | `job config init` + `/job-init` |
-| `profiles/<名>/profile.toml` | 搜索条件、搜索关键词、`[match]` 路径与薪资门槛 | `job profile new` + `/job-init` |
+| `profiles/<名>/profile.toml` | 搜索条件、搜索关键词、`[score]` 打分门槛与匹配信号表 | `job profile new` + `/job-init` |
 | `profiles/<名>/resume.md` | 简历（`job resume import` 抽文本，skill 整理） | `/job-init` |
 | `profiles/<名>/preferences.md` | 硬约束、薪资口径与底线、面试口径 | `/job-init` |
-| `profiles/<名>/match.toml` | **匹配信号表**——正负信号 + 权重 | `/job-init` |
 
-`match.toml` 是「换用户只改配置」这条承诺的关键：
+`profile.toml` 的 `[score]` 段是「换用户只改配置」这条承诺的关键：
 它编码的是个人取向（对做应用工程的人「预训练」是 −12，对做算法的人是 +12），
 所以绝不能进 `src/`，而且每个 profile 各一份。里面的正则**一律用 TOML
 字面量字符串（单引号）**——
 双引号里 `\b` 是「退格符」转义，会静默变成匹配不上任何东西的正则
-（`load_rules` 会拦下来，见 `core/matching/rules.py` 的 `_check_pattern`）。
+（`config/models.py` 的 `_check_pattern` 会拦下来）。
+
+它曾经是独立的 `profiles/<名>/match.toml`，已经合进 `profile.toml`。
+拆成两个文件唯一的效果是多一处要同步、多一条要解析的路径，
+而「换个人整份重写」的粒度本来就是**整个 profile**，不是单个文件。
+`[score]` 的产物路径也一并删了（原 `shortlist_output`）——写哪儿是每次调用的事，
+由 `job score -o` 说，不该固化成配置。
 
 ## 还没做的
 

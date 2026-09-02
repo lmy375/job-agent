@@ -12,9 +12,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from job_agent.config import Settings
+from job_agent.config import ScoreConfig, Settings
 from job_agent.core.dataset import JobFacts, load_rows
-from job_agent.core.matching.rules import MatchRules
 from job_agent.core.storage import Database
 from job_agent.log import get_logger
 
@@ -74,7 +73,7 @@ class ScoredJob(BaseModel):
         return "、".join(h.label() for h in self.penalties)
 
 
-def score_row(row: JobFacts, rules: MatchRules) -> ScoredJob:
+def score_row(row: JobFacts, rules: ScoreConfig) -> ScoredJob:
     """给一行打分。同一条信号在标题和正文都命中时只算标题（取高的那份）。"""
     title = row.jobName
     body = " ".join((row.description, row.responsibilities, row.requirements))
@@ -86,7 +85,7 @@ def score_row(row: JobFacts, rules: MatchRules) -> ScoredJob:
         in_title = bool(regex.search(title))
         if not in_title and not regex.search(haystack):
             continue
-        weight = signal.weight * (rules.options.title_multiplier if in_title else 1.0)
+        weight = signal.weight * (rules.title_multiplier if in_title else 1.0)
         scored.score += weight
         hit = Hit(name=signal.name, weight=weight, in_title=in_title)
         (scored.hits if signal.weight > 0 else scored.penalties).append(hit)
@@ -107,17 +106,17 @@ def score_row(row: JobFacts, rules: MatchRules) -> ScoredJob:
 def rank(
     db: Database,
     settings: Settings,
-    rules: MatchRules,
     floor_wan: float | None = None,
     dedupe: bool = True,
 ) -> list[ScoredJob]:
-    """读库、打分、排序。
+    """读库、打分、排序。信号表直接取自 ``settings.score``。
 
     ``floor_wan`` 过滤的是**薪资上限**而不是下限：JD 标的区间上限才代表
     「这家最多能给到多少」，按下限过滤会把「50-80k·20薪」这种谈得上去的岗位误杀。
     """
+    rules = settings.score
     rows = load_rows(db, dedupe=dedupe)
-    threshold = floor_wan if floor_wan is not None else settings.match.salary_floor_wan
+    threshold = floor_wan if floor_wan is not None else rules.salary_floor_wan
 
     out: list[ScoredJob] = []
     skipped = 0

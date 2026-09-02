@@ -112,10 +112,13 @@ class TaskParams(BaseModel):
 
     keywords: list[str] | None = Field(default=None, description="仅 search：只搜这些关键词")
     pages: int | None = Field(default=None, ge=1, le=6, description="仅 search：每个关键词翻几页")
-    limit: int | None = Field(
-        default=None, ge=1, le=MAX_PAGE_SIZE, description="仅 detail：本次最多抓多少条"
+    fetch_detail: bool = Field(
+        default=True, description="仅 search：搜完接着抓 JD。默认开——没有 JD 的库没法打分"
     )
-    retry_failed: bool = Field(default=False, description="仅 detail：重试此前失败的")
+    limit: int | None = Field(
+        default=None, ge=1, le=MAX_PAGE_SIZE, description="抓 JD 时本次最多抓多少条"
+    )
+    retry_failed: bool = Field(default=False, description="抓 JD 时连之前失败的一起重试")
 
 
 class CreateTaskRequest(BaseModel):
@@ -148,19 +151,21 @@ class SearchKeywordResult(BaseModel):
     error: str | None = None
 
 
-class SearchTaskResult(TaskResult):
-    totalFound: int
-    totalNew: int
-    keywords: list[SearchKeywordResult]
-    remaining: list[str] = Field(default_factory=list, description="限流中止时未搜的关键词")
-
-
 class DetailTaskResult(TaskResult):
     total: int
     fetched: int
     statuses: dict[str, int]
     elapsedSeconds: float
     abortedReason: str | None = None
+
+
+class SearchTaskResult(TaskResult):
+    totalFound: int
+    totalNew: int
+    keywords: list[SearchKeywordResult]
+    remaining: list[str] = Field(default_factory=list, description="限流中止时未搜的关键词")
+    #: params.fetch_detail 为真时，同一个任务顺带抓的 JD 结果
+    detail: DetailTaskResult | None = None
 
 
 class TaskView(BaseModel):

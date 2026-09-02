@@ -20,7 +20,14 @@ export default function TasksView() {
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ keywords: "", pages: "", limit: "", retryFailed: false });
+  const [form, setForm] = useState({
+    keywords: "",
+    pages: "",
+    limit: "",
+    retryFailed: false,
+    // 默认开：没有 JD 的库打不了分，搜完就抓才是常态
+    fetchDetail: true,
+  });
 
   const refresh = useCallback(async () => {
     try {
@@ -51,8 +58,9 @@ export default function TasksView() {
         .filter(Boolean);
       if (keywords.length) params.keywords = keywords;
       if (form.pages) params.pages = Number(form.pages);
+      params.fetch_detail = form.fetchDetail;
     }
-    if (kind === "detail") {
+    if (kind === "detail" || form.fetchDetail) {
       if (form.limit) params.limit = Number(form.limit);
       params.retry_failed = form.retryFailed;
     }
@@ -82,8 +90,8 @@ export default function TasksView() {
         <section className="panel">
           <h3>搜索职位</h3>
           <p className="muted">
-            按 config.toml 里的关键词批量搜索并入库。留空即用配置里的全部关键词。
-            接口限流按 token 记账，任务串行执行。
+            按 profile.toml 里的关键词批量搜索并入库，默认搜完接着抓 JD。
+            留空即用配置里的全部关键词。接口限流按 token 记账，任务串行执行。
           </p>
           <label>
             关键词（逗号分隔，可留空）
@@ -103,16 +111,25 @@ export default function TasksView() {
               onChange={(e) => setForm({ ...form, pages: e.target.value })}
             />
           </label>
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={form.fetchDetail}
+              onChange={(e) => setForm({ ...form, fetchDetail: e.target.checked })}
+            />
+            搜完自动抓 JD（关掉只入库列表；没有 JD 就没法打分）
+          </label>
           <button className="btn" onClick={() => submit("search")}>
-            开始搜索
+            {form.fetchDetail ? "开始搜索并抓 JD" : "只搜列表"}
           </button>
         </section>
 
         <section className="panel">
           <h3>抓取详情</h3>
           <p className="muted">
-            抓详情页里的 JobPosting 结构化数据。串行 + 随机休眠，单条约 4 秒，
-            进度实时落库，中断后重跑会自动跳过已完成的。
+            单独把库里还没抓的 JD 补上（搜索那边关掉了自动抓、或上次被限流打断时用）。
+            串行 + 随机休眠，单条约 4 秒，进度实时落库，中断后重跑会自动跳过已完成的。
+            下面两项对「搜完自动抓」同样生效。
           </p>
           <label>
             本次最多抓多少条（留空 = 全部待抓）

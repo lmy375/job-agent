@@ -50,7 +50,9 @@ model = "claude-opus-5"
 level = "WARNING"
 """
 
-#: profile 配置（profiles/test/profile.toml）：随人而变的那一半
+#: profile 配置（profiles/test/profile.toml）：随人而变的那一半。
+#: ``[score]`` 那张信号表刻意小：测试要能一眼看出「这条分数为什么是这个数」。
+#: 正则用 TOML 字面量字符串（单引号）——双引号里的 \b 会被当成退格符转义。
 PROFILE_TOML = """
 [profile]
 name = "测试用户"
@@ -68,9 +70,27 @@ keywords = ["AI Agent", "大模型", "安全专家"]
 [storage]
 database = "data/test.db"
 
-[match]
-rules = "match.toml"
-shortlist_output = "data/shortlist.md"
+[score]
+title_multiplier = 2.0
+
+[score.require]
+pattern = '\\bagent\\b|智能体|大模型|\\bllm\\b|\\bai\\b'
+penalty = -20.0
+
+[[score.signals]]
+name = "Agent"
+weight = 10
+pattern = '\\bagent\\b|智能体'
+
+[[score.signals]]
+name = "Python"
+weight = 5
+pattern = '\\bpython\\b'
+
+[[score.signals]]
+name = "算法训练岗"
+weight = -12
+pattern = '预训练|强化学习|模型训练'
 """
 
 #: 测试用的 profile 名。夹具都用它，不用 "default"——
@@ -112,7 +132,6 @@ def make_profile(root: Path, name: str = PROFILE, profile_toml: str = PROFILE_TO
     (directory / "profile.toml").write_text(profile_toml, encoding="utf-8")
     (directory / "resume.md").write_text("# 测试简历\n", encoding="utf-8")
     (directory / "preferences.md").write_text("# 求职偏好\n", encoding="utf-8")
-    (directory / "match.toml").write_text(MATCH_TOML, encoding="utf-8")
     return directory
 
 
@@ -127,7 +146,7 @@ def project_root(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def profile_dir(project_root: Path) -> Path:
-    """当前测试 profile 的目录。简历、信号表、库都在里面。"""
+    """当前测试 profile 的目录。简历、profile.toml、库都在里面。"""
     return project_root / "profiles" / PROFILE
 
 

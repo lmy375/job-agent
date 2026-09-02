@@ -57,7 +57,7 @@ timeout = 30.0
 user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 
 # ------------------------------------------------- LangGraph 独立执行（可选）
-# 装了 agent extra（uv sync --extra agent）后，`job agent` 一条命令跑完
+# `job agent` 一条命令跑完
 # 采集 → 分诊 → LLM 审读 → 投递计划。
 # 判断依据（简历/偏好/信号表）与上面共享，这里只有运行参数与密钥。
 [agent]

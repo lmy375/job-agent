@@ -10,7 +10,6 @@ from job_agent.agent.state import JDVerdict, ShortlistJob
 from job_agent.config import Settings
 from job_agent.context import AppContext
 from job_agent.core.dataset import JobFacts
-from job_agent.core.matching.rules import load_rules
 from job_agent.core.matching.scorer import ScoredJob, rank
 from job_agent.errors import ConfigError
 
@@ -40,11 +39,10 @@ def load_profile(settings: Settings) -> tuple[str, str]:
 def build_shortlist(ctx: AppContext, top_n: int) -> list[ShortlistJob]:
     """规则分诊：读库、打分、取前 ``top_n``，转成审读节点用的载荷。
 
-    与 ``job score`` 用的是同一套 ``load_rules`` + ``rank``，
+    与 ``job score`` 走的是同一个 ``rank``（同一份 ``[score]`` 信号表），
     两条执行路线对同一份数据得到同一个 shortlist。
     """
-    rules = load_rules(ctx.settings.match.rules)
-    scored = rank(ctx.db, ctx.settings, rules)
+    scored = rank(ctx.db, ctx.settings)
     return [_payload(job) for job in scored[:top_n]]
 
 

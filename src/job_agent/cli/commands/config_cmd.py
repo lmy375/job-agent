@@ -1,6 +1,6 @@
 """``job config``：初始化、查看、校验**全局**配置。
 
-per-profile 的那一半（简历、偏好、关键词、信号表）归 ``job profile``——
+per-profile 的那一半（简历、偏好、关键词、``[score]`` 信号表）归 ``job profile``——
 这里只管 ``config/config.toml``：猎聘账号密钥、限速、模型接入点、Web、日志。
 ``show`` / ``path`` / ``validate`` 看的是「全局 + 当前 profile」合起来的结果。
 """
@@ -15,7 +15,6 @@ import typer
 
 from job_agent.cli.state import CliState, echo_ok, echo_warn
 from job_agent.config import default_config_path, example_config_path, find_project_root
-from job_agent.core.matching import load_rules
 from job_agent.errors import ConfigError
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -81,7 +80,7 @@ def show(
     typer.echo(f"猎聘账号：{settings.profile.account}（token {token_state}）")
     for section in (
         "profiles", "profile", "search", "liepin", "detail", "storage",
-        "match", "agent", "web", "logging",
+        "score", "agent", "web", "logging",
     ):
         block = getattr(settings, section)
         typer.secho(f"\n[{section}]", fg=typer.colors.CYAN)
@@ -109,6 +108,18 @@ def show(
                 for index, keyword in enumerate(block.keywords, 1):
                     typer.echo(f"  {index:>2}. {keyword}")
                 continue
+            if key == "require":
+                # 嵌套模型直接 dump 出来是一行 dict，正则又长，拆成两行才读得动
+                typer.echo(f"  {'require.pattern':<20}{block.require.pattern or '（未设）'}")
+                typer.echo(f"  {'require.penalty':<20}{block.require.penalty}")
+                continue
+            if key == "signals":
+                # 几十条正则，全打出来会把这份概览淹掉；要看内容直接翻 profile.toml。
+                # 权重分布是这里唯一有用的信息：只有正信号说明负信号忘了写
+                positive = sum(1 for sig in block.signals if sig.weight > 0)
+                negative = len(block.signals) - positive
+                typer.echo(f"  {key:<20}{len(block.signals)} 条（正 {positive} / 负 {negative}）")
+                continue
             typer.echo(f"  {key:<20}{value}")
 
 
@@ -135,8 +146,6 @@ def path(
     typer.echo(f"database     {settings.storage.database}")
     typer.echo(f"resume       {settings.profile.resume}")
     typer.echo(f"preferences  {settings.profile.preferences}")
-    typer.echo(f"match        {settings.match.rules}")
-    typer.echo(f"shortlist    {settings.match.shortlist_output}")
 
 
 @app.command("validate", help="校验配置是否可用（含 token、简历、素材是否就位）。")
@@ -161,18 +170,13 @@ def validate(ctx: typer.Context) -> None:
         problems.append(f"简历文件不存在：{settings.profile.resume}（跑 /job-init）")
     if not settings.profile.preferences.is_file():
         problems.append(f"求职偏好文件不存在：{settings.profile.preferences}（跑 /job-init）")
-    if not settings.match.rules.is_file():
+    # 正则写错、权重写成字符串这类问题在读 profile.toml 时就已经炸了
+    # （[score] 是配置树的一部分），这里只需要管「压根没写」这一种
+    if not settings.score.signals:
         problems.append(
-            f"匹配信号表不存在：{settings.match.rules}"
-            "（跑 /job-init；缺它 job score 跑不了）"
+            "profile.toml 的 [score] 段里没有任何 [[score.signals]]"
+            "（跑 /job-init；没有信号表所有岗位都是 0 分，job score 排序没有意义）"
         )
-    else:
-        # 存在就顺手解析一遍：正则写错、权重写成字符串这类问题要在这里暴露，
-        # 而不是等 job score 跑到一半才炸
-        try:
-            load_rules(settings.match.rules)
-        except ConfigError as exc:
-            problems.append(str(exc))
 
     for problem in problems:
         echo_warn(problem)

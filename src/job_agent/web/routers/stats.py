@@ -21,7 +21,7 @@ def overview(context: ContextDep) -> OverviewResponse:
         details=context.details.status_counts(),
         applications=context.applications.status_counts(),
         salary=context.jobs.salary_summary(
-            floor_wan=context.settings.match.salary_floor_wan
+            floor_wan=context.settings.score.salary_floor_wan
         ),
         keywords=context.jobs.keyword_counts(),
         pendingDetails=len(context.jobs.missing_details()),

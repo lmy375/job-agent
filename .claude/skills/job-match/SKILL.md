@@ -39,8 +39,9 @@ uv run job -p <名字> stats                # 库里有多少数据、抓了多�
 库是空的 → 先让用户跑 `job search`（它会搜完接着抓 JD），别硬做。
 
 **路径一律从 `config path --json` 取，不要按记忆拼 `config/resume.md` 这种路径**——
-它们随 profile 变。下面用 `<resume>` / `<preferences>` / `<match>` / `<database>`
-指代那份 JSON 里对应的字段。
+它们随 profile 变。下面用 `<resume>` / `<preferences>` / `<database>`
+指代那份 JSON 里对应的字段；信号表没有单独的路径，它是 `<profileFile>`
+（profile.toml）里的 `[score]` 段。
 
 然后**必读这两份文件**（它们是你全部判断的依据）：
 
@@ -54,27 +55,27 @@ uv run job -p <名字> stats                # 库里有多少数据、抓了多�
 ## 第 1 步：分诊
 
 ```bash
-uv run job -p <名字> score --top 30 --why
+uv run job -p <名字> score -n 30 --why
 ```
 
 `--why` 会打出每条的命中与扣分信号。扫一遍，判断**信号表本身准不准**：
 
-- 明显不该进前列的岗位排很高 → `<match>` 缺一条负信号
-- 明显该进的没进 → 缺正信号，或 `--floor` / `match.salary_floor_wan` 门槛太高
-- 大面积「不含目标方向关键词」→ `[require].pattern` 写窄了
+- 明显不该进前列的岗位排很高 → `[score]` 缺一条 `[[score.signals]]` 负信号
+- 明显该进的没进 → 缺正信号，或 `--floor` / `[score].salary_floor_wan` 门槛太高
+- 大面积「不含目标方向关键词」→ `[score.require].pattern` 写窄了
 
-**改 `<match>`（当前 profile 的 `match.toml`）再重跑，不要在分析里手工纠偏。**
+**改 profile.toml 的 `[score]` 信号表再重跑，不要在分析里手工纠偏。**
 手工纠偏这次能用，
 下次跑又是老样子；改配置才是积累。改完告诉用户你改了什么、为什么。
 
 ## 第 2 步：生成清单骨架
 
 ```bash
-uv run job -p <名字> score --shortlist -n 12
+uv run job -p <名字> score -n 12 -o data/shortlist.md
 ```
 
-产出 profile 的 `data/shortlist.md`（路径见 `config path --json` 的 `shortlist`），
-里面每条岗位有三处 `<待 /job-match 填写>`：
+产出 `<profileDir>/data/shortlist.md`（`-o` 的相对路径按 profile 目录解析，
+所以不用管自己在哪个目录），里面每条岗位有三处 `<待 /job-match 填写>`：
 **硬门槛核对**、**投不投**、**投递口径**。你的工作就是填掉它们。
 
 ## 第 3 步：逐条读 JD，填三处空
@@ -147,8 +148,8 @@ sqlite3 "<database>" "select description from job_details where jobId = <id>;"
 - **不编造。** JD 里没写的要求不要替它想；简历里没有的经历不要替用户圆。
   信息不足就写「JD 没写清，面试要问」。
 - **不改简历事实**，只改措辞与顺序，且要告诉用户改了什么。
-- **不写一次性打分脚本。** 要改打分就改当前 profile 的 `match.toml`——
+- **不写一次性打分脚本。** 要改打分就改当前 profile 的 `[score]` 信号表——
   那才能跨会话复用。
 - 判断写进当前 profile 的 `data/shortlist.md`，不要写进它的输入文件
-  （`resume.md` / `preferences.md` / `match.toml` 是用户的输入，不是你的产出）。
+  （`resume.md` / `preferences.md` / `profile.toml` 是用户的输入，不是你的产出）。
 - **只碰选定的那个 profile。** 别的 profile 可能是另一个人的东西。

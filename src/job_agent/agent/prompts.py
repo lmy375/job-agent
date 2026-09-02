@@ -1,7 +1,7 @@
 """审读节点的 prompt。
 
 **这里只写方法论，不写任何个人取向。** 「这个人在乎什么」全部来自
-``config/``（resume.md、preferences.md、match.toml），运行时注入——
+``config/``（resume.md、preferences.md、profile.toml 的 ``[score]``），运行时注入——
 「换用户只改 config」这条承诺对 agent 路线同样成立。
 """
 

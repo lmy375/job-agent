@@ -23,7 +23,7 @@
 
 **它不做市场分析。** 「这个方向在招什么、要什么技能」不是这个仓库的功能——
 那件事太因人而异，固定的切法只对写它的人有用（详见 CLAUDE.md「不承担市场分析」）。
-仓库只负责把事实准备好：去重、薪资换算、按你的 `match.toml` 排序。
+仓库只负责把事实准备好：去重、薪资换算、按你的 `[score]` 信号表排序。
 
 运行按 **profile** 隔离：**一个 profile = 一个人，或者一种求职场景**
 （「AI 应用工程」和「Web3 安全」可以是两个 profile）。每个 profile 是一个自包含的目录，
@@ -36,7 +36,7 @@ uv run job config init       # 生成全局配置 config/config.toml（密钥填
 uv run job profile new me    # 建一个 profile（简历、关键词、数据库都在它自己的目录里）
 uv run job search            # 采集职位（搜完自动抓 JD）
 uv run job score             # 按信号表给职位打分排序（分诊）
-uv run job score --shortlist # 生成候选清单骨架
+uv run job score -o data/shortlist.md   # 生成候选清单骨架
 uv run job web               # 打开 Web 管理台
 ```
 
@@ -54,11 +54,11 @@ uv run job profile use web3  # 把它设成默认，之后不用每次带 -p
 两份配置文件里的注释改，填完 `uv run job config validate` 自检。
 
 采完数据之后**跑 `/job-match`**：它读 JD、比硬门槛、排投递优先级、写投递口径，
-把 `job score --shortlist` 留白的判断部分填掉。完整流程：
+把 `job score -o` 留白的判断部分填掉。完整流程：
 
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
-job search → job score → job score --shortlist → /job-match → job apply
+job search → job score → job score -o → /job-match → job apply
           ↘ job web （翻 JD、看库存、点投递）
 ```
 
@@ -71,11 +71,10 @@ config/                跟人无关的那一半
   templates/           新建 profile 的模板，整份拷成一个新 profile（进版本库）
 profiles/              随人而变的那一半，整个目录不进版本库
   <名字>/               一个 profile = 一个人 / 一种求职场景，自包含
-    profile.toml       搜索条件、搜索关键词、匹配门槛
+    profile.toml       搜索条件与关键词 + [score] 匹配信号表（正负信号 + 权重）
     resume.md          你的简历
     preferences.md     求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
-    match.toml         匹配信号表：正负信号 + 权重（决定 job score 的排序）
-    data/              jobs.db、shortlist.md（job score --shortlist 的产物）、agent-plan.md
+    data/              jobs.db、shortlist.md（job score -o 的产物）、agent-plan.md
 src/job_agent/
   config/              配置加载与校验（TOML → 校验过的 Settings，密钥是 SecretStr）
   core/                核心能力，不依赖 CLI / Web
@@ -89,7 +88,7 @@ src/job_agent/
     salary.py          薪资文本 → 年薪区间（万元，税前）
   cli/                 typer 子命令（执行路线一：人或 skill 驱动）
   web/                 FastAPI 管理后端 + 后台任务
-  agent/               LangGraph 独立执行（执行路线二，装 --extra agent 才可用）
+  agent/               LangGraph 独立执行（执行路线二）
 frontend/              React（Vite）管理台，构建到 frontend/dist 由后端托管
 scripts/               一次性脚本（导出、关键词覆盖率核对）
 tests/                 pytest（不碰真实库、不发网络请求）
@@ -112,14 +111,14 @@ tests/                 pytest（不碰真实库、不发网络请求）
 | 文件 | 管什么 | 段 |
 | --- | --- | --- |
 | `config/config.toml` | **怎么连**，跟人无关，全局一份 | `[profiles]`、`[liepin]`、`[detail]`、`[agent]`、`[web]`、`[logging]` |
-| `profiles/<名>/profile.toml` | **找什么**，随人而变，一个 profile 一份 | `[profile]`、`[search]`、`[storage]`、`[match]` |
+| `profiles/<名>/profile.toml` | **找什么**，随人而变，一个 profile 一份 | `[profile]`、`[search]`、`[storage]`、`[score]` |
 
 - `config/config.toml`：全部密钥都在这（猎聘 token、模型 API key、LangSmith key）。
   它不进版本库，所以密钥直接填在里面；每一项都有注释，见 `config/config.example.toml`。
   猎聘 token 填在 `[liepin.accounts.<账号名>].user_token`，前往
   <https://www.liepin.com/mcp/auth> 生成。可以同时放几个人的账号，
   profile 用 `[profile].account` 指一个——换人不用来回重贴 token。
-- `profiles/<名>/profile.toml`：搜索条件、搜索关键词、匹配门槛。
+- `profiles/<名>/profile.toml`：搜索条件、搜索关键词、`[score]` 打分门槛与匹配信号表。
   里面的相对路径都相对于**这个 profile 的目录**，所以两个 profile 的
   `data/jobs.db` 是两个库。
 - `profiles/<名>/resume.md`、`preferences.md`：你的简历与求职偏好。程序不解析它们，
@@ -166,9 +165,11 @@ profile 这一层重复了一遍。想同时跑两条线就开两个 profile
 
 ```bash
 job search [-k 关键词]... [--pages N] [--limit N] [--retry-failed] [--no-detail] [--dry-run]
-job score [--floor 万] [--top N] [--why] [--json] [--shortlist] [--no-dedupe]
+job score [--floor 万] [-n N] [--why] [--json] [-o 路径] [--no-dedupe]
+           # -o 的相对路径按 profile 目录解析；配 --json 就是把 JSON 写进文件
 job resume import <文件> [-o 输出路径] [--force]
 job apply <jobId>... [--job-kind 1|2] [--yes]
+job agent [--collect] [--apply] [-n N] [--provider P] [--model M] [--thread ID]
 job stats
 job web [--host H] [--port P] [--no-browser] [--skip-build]
 job profile list|new|use|path
@@ -195,12 +196,14 @@ skill 与外部脚本靠它定位文件——路径随 profile 变，不该在�
 采集解决「有哪些岗」，这两样解决「该投哪几个」。分界线是**确定性 vs 判断**：
 
 ```bash
-uv run job score --top 30 --why       # 打分排序，--why 展开命中与扣分理由
+uv run job score -n 30 --why          # 打分排序，--why 展开命中与扣分理由
 uv run job score --json               # 给脚本用
-uv run job score --shortlist -n 12    # 写出 <profile>/data/shortlist.md（判断部分留白）
+uv run job score -n 12 -o data/shortlist.md   # 写出候选清单骨架（判断部分留白）
+uv run job score --json -o out.json   # -o 决定写文件，--json 决定格式，两者正交
 ```
 
-`job score` 的排序来自当前 profile 的 `match.toml` 信号表，**它是配置不是代码**——
+`job score` 的排序来自当前 profile 的 `[score]` 信号表（在 `profile.toml` 里），
+**它是配置不是代码**——
 编码的是「你想要什么」，换个人应当整份重写：
 
 ```toml
@@ -230,7 +233,7 @@ pattern = '预训练|后训练|强化学习|模型训练'
   「这个岗要 50 人管理经验而你带 5 人」这种判断要读 JD，是 `/job-match` 的事。
   第 1 名可能有硬门槛冲突，第 8 名可能才是最该投的。
 
-`--shortlist` 产出的 Markdown 里，每条岗位有三处 `<待 /job-match 填写>`：
+`-o` 产出的 Markdown 里，每条岗位有三处 `<待 /job-match 填写>`：
 **硬门槛核对**、**投不投**、**投递口径**。代码刻意不填——填了模板话术，
 人会以为已经分析过了，比留空更糟。
 
@@ -240,10 +243,10 @@ pattern = '预训练|后训练|强化学习|模型训练'
 无人值守版——LangGraph 组的固定管线，一条命令跑完 **分诊 → 逐岗审读 → 投递计划**，
 共享同一个数据库、同一份 `config/`：
 
-```bash
-uv sync --extra agent                 # 依赖是可选的，不装不影响 job / job web
-# config/config.toml 的 [agent.providers.*] 里填 api_key（审读节点要调模型 API）
+依赖跟着 `uv sync` 一起装；唯一的前置是在 `config/config.toml` 的
+`[agent.providers.*]` 里填 `api_key`（审读节点要调模型 API）。
 
+```bash
 uv run job agent                      # 用库内已有数据：分诊 → 审读 → <profile>/data/agent-plan.md
 uv run job agent --collect            # 先采集（搜索 + 抓 JD）再走上面的流程
 uv run job agent --apply              # 出完计划后进入投递确认（终端里逐条拍板）
@@ -291,7 +294,7 @@ base_url = "https://openrouter.ai/api/v1"
 structured_output = "function_calling"
 ```
 
-带 `:free` 后缀的 slug 不花钱，代价是每日调用上限，跑之前用 `--top` 控量。
+带 `:free` 后缀的 slug 不花钱，代价是每日调用上限，跑之前用 `-n` 控量。
 另有一个特例 `openrouter/free`，它是**免费模型路由器**：每次调用从当前可用的
 免费模型里随机挑一个，更省事，但同一批岗位可能由不同模型判、快慢差别很大，
 裁决口径不可比——想要可比的结论就填具体 slug。
@@ -371,7 +374,7 @@ JD 来自详情页里的 `<script type="application/ld+json">` **JobPosting** �
 
 - **猎聘的薪资筛选是「区间重叠」而不是「下限 ≥ 门槛」**，还会漏进明显不达标的条目
   （样本里出现过实习生岗）。所以 `job stats` 会单独报「薪资上限真正 ≥ 门槛」的比例，
-  提醒你搜回来的不都是达标岗。门槛取自 profile 的 `[match].salary_floor_wan`，
+  提醒你搜回来的不都是达标岗。门槛取自 profile 的 `[score].salary_floor_wan`，
   **没配就不报这个比例**——不假装存在一条客观的达标线。
 - **同一份 JD 常被多家猎头重复挂出**：正文一字不差，但职位名和标价各挂各的
   （实测有一份被挂了 8 次，同一岗位标价能差 2–3 倍）。
@@ -379,7 +382,7 @@ JD 来自详情页里的 `<script type="application/ld+json">` **JobPosting** �
   用「职位名 + 正文」做键会漏掉大部分重复。
 - **薪资门槛比的是区间上限，不是下限。** 上限才代表「这家最多能给到多少」，
   按下限过滤会误杀「50-80k·20薪」这类实际能谈上去的岗位。
-- **写 `match.toml` 的正则时，英文缩写一定要加 `\b`。** 这是踩过的坑：
+- **写 `[score]` 里的正则时，英文缩写一定要加 `\b`。** 这是踩过的坑：
   `APT` 不加词边界会命中「C**apt**ion」，`Web\s?3` 会命中「**Web 3D**」。
   信号表是你自己的配置，没有人替你复核——`job score --why` 打出命中理由就是
   给你自查用的。

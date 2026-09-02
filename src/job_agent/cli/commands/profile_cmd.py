@@ -1,6 +1,7 @@
 """``job profile``：管理 profile——一个用户或一种求职场景。
 
-一个 profile 是一个自包含的目录：简历、求职偏好、匹配信号表、搜索关键词、
+一个 profile 是一个自包含的目录：简历、求职偏好、profile.toml（搜索关键词 +
+``[score]`` 匹配信号表）、
 数据库、产物全在里面。所以「复制一个 profile」就是复制文件夹，
 「删掉一个 profile」就是删文件夹——这里刻意不提供 ``rm``：
 那一下会连着简历和几百条采集记录一起没，交给用户自己动手更诚实。
@@ -59,7 +60,7 @@ def list_cmd() -> None:
         return
 
     typer.echo(f"{profiles_dir}\n")
-    header = f"{'':<2}{'名字':<16}{'职位':>8}{'已投':>6}  简历  偏好  信号表"
+    header = f"{'':<2}{'名字':<16}{'职位':>8}{'已投':>6}  简历  偏好  信号"
     typer.secho(header, bold=True)
     for name in names:
         mark = "→" if name == settings.profiles.default else " "
@@ -68,7 +69,7 @@ def list_cmd() -> None:
         typer.echo(
             f"{mark} {name:<16}{jobs:>8}{applied:>6}"
             f"  {_flag(directory / 'resume.md')}    {_flag(directory / 'preferences.md')}"
-            f"    {_flag(directory / 'match.toml')}"
+            f"   {_signals(directory):>3}"
         )
     if settings.profiles.default is None and len(names) > 1:
         typer.echo(
@@ -79,6 +80,22 @@ def list_cmd() -> None:
 
 def _flag(path: Path) -> str:
     return "✓" if path.is_file() else "×"
+
+
+def _signals(directory: Path) -> str:
+    """这个 profile 的 ``[score]`` 里写了几条信号。
+
+    读文件而不是走 ``load_settings``：列表要能把配置坏掉的 profile 也列出来
+    （那正是你想看见它的时候），所以解析失败只显示 ``×``，不抛。
+    """
+    profile_file = directory / "profile.toml"
+    if not profile_file.is_file():
+        return "×"
+    try:
+        signals = _read_toml(profile_file).get("score", {}).get("signals", [])
+    except ConfigError:
+        return "×"
+    return str(len(signals)) if signals else "×"
 
 
 def _counts(root: Path, directory: Path) -> tuple[str, str]:
