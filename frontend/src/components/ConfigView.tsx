@@ -412,7 +412,7 @@ export default function ConfigView() {
           </p>
           <PromptEditor
             title="维度一 · 岗位吸引力"
-            hint="从求职者角度：薪资水位、公司体量与阶段、JD 写得专不专业、业务靠不靠谱、是否落在你的方向里。"
+            hint="从求职者角度，以 preferences.md 里的求职期望为决定性标准——先按方向定分数区间，方向不对的岗位薪资再高也抬不出上限；其次才看薪资水位、公司体量与阶段、JD 专不专业、业务靠不靠谱。"
             view={prompts.appeal}
             value={appealText}
             onChange={setAppealText}
