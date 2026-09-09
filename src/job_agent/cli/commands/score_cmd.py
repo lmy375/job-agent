@@ -27,7 +27,7 @@ from typing import Annotated
 import typer
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from job_agent.cli.state import CliState, echo_ok, echo_warn
+from job_agent.cli.state import CliState, band, clip, echo_ok, echo_warn
 from job_agent.config import Settings
 from job_agent.core.matching import ScoredJob, refresh, render_shortlist
 from job_agent.core.matching.shortlist import TODO, write_shortlist
@@ -149,8 +149,8 @@ def score(
     typer.echo(f"{'分':>5}  {'年薪(万)':<12}岗位 / 公司")
 
     for job in jobs[:limit]:
-        typer.echo(f"{job.score:>5.0f}  {_band(job.salary_low, job.salary_high):<14}"
-                   f"{_clip(job.title, 40)} | {_clip(job.company, 20)}")
+        typer.echo(f"{job.score:>5.0f}  {band(job.salary_low, job.salary_high):<14}"
+                   f"{clip(job.title, 40)} | {clip(job.company, 20)}")
         if why:
             if job.hits:
                 typer.secho(f"        + {job.reasons()}", fg=typer.colors.GREEN)
@@ -188,25 +188,6 @@ def _write_shortlist(
         f"\n里面有 {content.count(TODO)} 处 `{TODO}` 等着填——那是需要读 JD 才能回答的部分。"
         "\n下一步：在 Claude Code 里跑 `/job-match`，它会逐条读 JD、比硬门槛、排投递优先级。"
     )
-
-
-def _band(low: float | None, high: float | None) -> str:
-    if low is None or high is None:
-        return "—"
-    return f"{low:.0f}-{high:.0f}"
-
-
-def _clip(text: str, width: int) -> str:
-    """按显示宽度截断（中文算两格），让终端里的列对得上。"""
-    out, used = [], 0
-    for char in text:
-        step = 2 if ord(char) > 0x2E80 else 1
-        if used + step > width:
-            out.append("…")
-            break
-        out.append(char)
-        used += step
-    return "".join(out)
 
 
 def _as_json(job: ScoredJob, rank: int) -> ScoreJson:

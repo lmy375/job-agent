@@ -1,4 +1,4 @@
-"""把改动写回 ``profiles/<名>/profile.toml``（搜索关键词 + ``[score]`` 打分逻辑）。
+"""把改动写回当前 profile 的文件（``profile.toml`` + LLM 打分的提示词 md）。
 
 Web 管理台的「配置」页能直接改这两样，但**配置仍然只有文件这一处落盘**：
 页面上按保存就是改这个文件，改完重新 ``load_settings()`` 一遍。
@@ -16,6 +16,10 @@ Web 管理台的「配置」页能直接改这两样，但**配置仍然只有�
 
 其余每一个字节原样保留。同一个思路见 ``cli/commands/profile_cmd.py``
 的 ``_write_default``。
+
+:func:`write_prompt` 写的是另一类文件：LLM 打分两个维度的提示词覆盖 md。
+它没有「段」可言，整份替换即可；**内容为空就删文件**，回到 ``src`` 里的内置默认——
+存一份空提示词会让模型收到一段没有方法论的 system，比没有覆盖更糟。
 
 正则一律渲染成 **TOML 字面量字符串（单引号）**：双引号里 ``\\b`` 是「退格符」
 转义，会静默变成匹配不上任何东西的正则（见 ``config/models.py`` 的
@@ -77,6 +81,22 @@ def write_score(profile_file: Path, score: ScoreConfig) -> Path:
     return _write_lines(profile_file, [*lines[:start], *block, *lines[end:]])
 
 
+def write_prompt(path: Path, content: str) -> Path | None:
+    """写一份 LLM 打分提示词的覆盖文件；``content`` 去空白后为空就**删掉它**。
+
+    返回写入的路径，删除时返回 ``None``——调用方据此就能说清「现在用的是
+    自定义还是内置默认」，不必再 stat 一次。
+    """
+    text = content.strip()
+    if not text:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise ConfigError(f"删除提示词文件失败（{path}）：{exc}") from exc
+        return None
+    return _atomic_write(path, text + "\n")
+
+
 # ------------------------------------------------------------------ 文件读写
 
 
@@ -90,22 +110,26 @@ def _read_lines(profile_file: Path) -> list[str]:
 
 
 def _write_lines(profile_file: Path, lines: list[str]) -> Path:
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    return _atomic_write(profile_file, "".join(lines))
+
+
+def _atomic_write(path: Path, text: str) -> Path:
     """整份原子替换：同目录临时文件 + rename。
 
     直接覆盖的话，写到一半出错（磁盘满、进程被杀）会留下一个残缺的
     profile.toml——那意味着简历还在、信号表没了，而且看不出来。
     """
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += "\n"
-    temp = profile_file.with_name(f"{profile_file.name}.tmp")
+    temp = path.with_name(f"{path.name}.tmp")
     try:
-        profile_file.parent.mkdir(parents=True, exist_ok=True)
-        temp.write_text("".join(lines), encoding="utf-8")
-        temp.replace(profile_file)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp.write_text(text, encoding="utf-8")
+        temp.replace(path)
     except OSError as exc:
         temp.unlink(missing_ok=True)
-        raise ConfigError(f"配置文件写入失败（{profile_file}）：{exc}") from exc
-    return profile_file
+        raise ConfigError(f"配置文件写入失败（{path}）：{exc}") from exc
+    return path
 
 
 # ------------------------------------------------------------------ 定位

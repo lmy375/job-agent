@@ -438,3 +438,101 @@ def test_resume_import_bad_file(config_path, tmp_path):
     result = run(config_path, "resume", "import", str(tmp_path / "nope.pdf"))
     assert result.exit_code == 5
     assert "文件不存在" in result.stderr
+
+
+# ---------------------------------------------------------------- job llm-score
+
+
+def _fake_scorer(monkeypatch, fail: bool = False):
+    """替掉 build_scorer 里的模型客户端，命令跑通但一个请求都不发。"""
+    from job_agent.core.matching import LlmVerdict, llm_scorer
+
+    class FakeLLM:
+        def invoke(self, messages):
+            if fail:
+                raise RuntimeError("模型抽风")
+            return LlmVerdict(
+                appeal_score=9,
+                appeal_reasons=["已上市、万人规模"],
+                fit_score=5,
+                fit_reasons=["JD 要求 10 年，简历 6 年"],
+            )
+
+    real = llm_scorer.build_scorer
+
+    def patched(settings, db, repo, on_progress=None, llm=None):
+        return real(settings, db, repo, on_progress, llm or FakeLLM())
+
+    monkeypatch.setattr(llm_scorer, "build_scorer", patched)
+    monkeypatch.setattr("job_agent.cli.commands.llm_score_cmd.build_scorer", patched)
+
+
+def test_llm_score_requires_explicit_scope(config_path, context):
+    """不给范围就退出 2：一条命令顺手花掉几千次调用的钱，不该是「忘了带参数」。"""
+    seed_agent_job(context)
+    result = run(config_path, "llm-score")
+    assert result.exit_code == 2
+    assert "按条计费" in result.stdout
+
+
+def test_llm_score_top_n(config_path, context, monkeypatch):
+    _fake_scorer(monkeypatch)
+    seed_agent_job(context)
+    result = run(config_path, "llm-score", "--top", "5", "--why")
+    assert result.exit_code == 0
+    assert "Agent 平台工程师" in result.stdout
+    assert "已上市、万人规模" in result.stdout
+    # 两个分数并列，界面上就得说清楚不合成总分
+    assert "并列" in result.stdout
+
+
+def test_llm_score_skips_second_run(config_path, context, monkeypatch):
+    _fake_scorer(monkeypatch)
+    seed_agent_job(context)
+    run(config_path, "llm-score", "1")
+    result = run(config_path, "llm-score", "1")
+    assert result.exit_code == 0
+    assert "新打 0 条，跳过 1 条" in result.stdout
+
+
+def test_llm_score_json_contract(config_path, context, monkeypatch):
+    _fake_scorer(monkeypatch)
+    seed_agent_job(context)
+    result = run(config_path, "llm-score", "1", "--json")
+    assert result.exit_code == 0
+    (entry,) = json.loads(result.stdout)
+    assert entry["jobId"] == 1
+    assert (entry["appeal"], entry["fit"]) == (9, 5)
+    assert entry["fitReasons"] == ["JD 要求 10 年，简历 6 年"]
+
+
+def test_llm_score_unknown_provider(config_path, context):
+    """报错要指到具体那张表——三家并存时「没这个 provider」本身不够定位。"""
+    seed_agent_job(context)
+    result = run(config_path, "llm-score", "1", "--provider", "kimi")
+    assert result.exit_code == 2
+    assert "[agent.providers.kimi]" in result.stdout
+
+
+def test_llm_score_missing_api_key(config_path, context):
+    """模板里 api_key 是空的，真跑起来要给出「去哪填」的报错而不是栈。"""
+    seed_agent_job(context)
+    result = run(config_path, "llm-score", "1")
+    assert result.exit_code == 2
+    assert "api_key" in result.output
+
+
+def test_llm_score_single_failure_reported(config_path, context, monkeypatch):
+    _fake_scorer(monkeypatch, fail=True)
+    seed_agent_job(context)
+    result = run(config_path, "llm-score", "1")
+    assert result.exit_code == 0
+    assert "失败 1 条" in result.stdout
+
+
+def test_stats_reports_llm_coverage(config_path, context, monkeypatch):
+    _fake_scorer(monkeypatch)
+    seed_agent_job(context)
+    assert "还没打过" in run(config_path, "stats").stdout
+    run(config_path, "llm-score", "1")
+    assert "LLM 打分        1/1" in run(config_path, "stats").stdout

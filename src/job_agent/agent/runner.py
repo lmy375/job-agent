@@ -71,9 +71,9 @@ def run(options: AgentRunOptions) -> int:
     from langgraph.types import Command
 
     from job_agent.agent.build import build_graph, state_serde
-    from job_agent.agent.llm import build_llm
     from job_agent.agent.state import AgentState
     from job_agent.context import AppContext
+    from job_agent.core.llm import build_llm
 
     try:
         ctx = AppContext.create(
@@ -102,7 +102,9 @@ def run(options: AgentRunOptions) -> int:
         settings.agent.active.model = options.model
 
     try:
-        llm = build_llm(settings)
+        llm = build_llm(
+            settings.agent.active, settings.agent.provider, "agent 路线的审读节点"
+        )
     except JobAgentError as exc:
         print(f"!! {exc}", file=sys.stderr)
         ctx.close()

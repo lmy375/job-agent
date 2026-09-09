@@ -9,12 +9,14 @@ from job_agent.core.storage.models import (
     JobDetailRecord,
     JobRecord,
     JobScoreRecord,
+    LlmScoreRecord,
 )
 from job_agent.core.storage.repositories import (
     ApplicationRepository,
     DetailRepository,
     JobQuery,
     JobRepository,
+    LlmScoreRepository,
     ScoreRepository,
 )
 from job_agent.core.storage.rows import (
@@ -23,6 +25,8 @@ from job_agent.core.storage.rows import (
     JobDetailRow,
     JobRow,
     KeywordCount,
+    LlmScoreEntry,
+    LlmScoreStatus,
     PendingDetail,
     SalarySummary,
     ScoreEntry,
@@ -45,6 +49,10 @@ __all__ = [
     "JobRow",
     "JobScoreRecord",
     "KeywordCount",
+    "LlmScoreEntry",
+    "LlmScoreRecord",
+    "LlmScoreRepository",
+    "LlmScoreStatus",
     "PendingDetail",
     "SalarySummary",
     "ScoreEntry",

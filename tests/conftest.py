@@ -98,33 +98,6 @@ pattern = '预训练|强化学习|模型训练'
 PROFILE = "test"
 
 
-#: 一份最小可用的信号表。刻意小：测试要能一眼看出「这条分数为什么是这个数」。
-#: 正则用 TOML 字面量字符串（单引号）——双引号里的 \\b 会被当成退格符转义。
-MATCH_TOML = """
-[options]
-title_multiplier = 2.0
-
-[require]
-pattern = '\\bagent\\b|智能体|大模型|\\bllm\\b|\\bai\\b'
-penalty = -20.0
-
-[[signals]]
-name = "Agent"
-weight = 10
-pattern = '\\bagent\\b|智能体'
-
-[[signals]]
-name = "Python"
-weight = 5
-pattern = '\\bpython\\b'
-
-[[signals]]
-name = "算法训练岗"
-weight = -12
-pattern = '预训练|强化学习|模型训练'
-"""
-
-
 def make_profile(root: Path, name: str = PROFILE, profile_toml: str = PROFILE_TOML) -> Path:
     """在 ``root`` 下建一个 profile 目录。多 profile 的隔离用例靠它建第二个。"""
     directory = root / "profiles" / name

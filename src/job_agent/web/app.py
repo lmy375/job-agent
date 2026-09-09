@@ -29,9 +29,10 @@ DESCRIPTION = """
 猎聘职位数据管理台。
 
 - `/api/jobs` 职位列表与详情、投递
-- `/api/tasks` 后台采集任务（搜索 / 抓详情）
+- `/api/tasks` 后台任务（搜索 / 抓详情 / LLM 打分）
 - `/api/scores/refresh` 按当前 `[score]` 重新打分（= `job score`）
-- `/api/config` 当前配置；搜索关键词与 `[score]` 可改（写回 profile.toml）
+- `/api/config` 当前配置；搜索关键词、`[score]`、LLM 打分提示词可改（写回 profile 目录）
+- `/api/config/prompts` LLM 打分两个维度的提示词（= `job llm-score` 用的那两段）
 - `/api/stats` 库内数据概览
 """
 

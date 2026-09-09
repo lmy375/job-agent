@@ -144,11 +144,12 @@ class ScoreRefresh(BaseModel):
         return out
 
 
-def refresh(db: Database, settings: Settings) -> ScoreRefresh:
-    """按当前 ``[score]`` 信号表给全库重新打分，写进 ``job_scores``。
+def score_all(db: Database, settings: Settings) -> ScoreRefresh:
+    """按当前 ``[score]`` 给全库打分排序，**不落库**。
 
-    每次都是**整表重写**：分数之间有关系（``rank`` 是全库排名），
-    只更新一部分留下的排名是错的，而且错得看不出来。
+    :func:`refresh` 在它之上加一步整表重写。分开是因为有人只想要排序结果
+    （比如 LLM 打分要按分数挑前 N 条送模型），那种场景顺手改写 ``job_scores``
+    是个意外的副作用——库里的名次什么时候变，该由 ``job score`` 说了算。
     """
     rules = settings.score
     rows = load_rows(db, dedupe=False)
@@ -157,8 +158,17 @@ def refresh(db: Database, settings: Settings) -> ScoreRefresh:
 
     # 去重放在打分之后：它就地给存活的行打上 dupes，所以 ScoredJob.row.dupes 跟着对
     unique = {row.jobId for row in dedupe_rows(rows)}
+    return ScoreRefresh(jobs=scored, unique_ids=unique, fingerprint=rules.fingerprint)
 
-    fingerprint = rules.fingerprint
+
+def refresh(db: Database, settings: Settings) -> ScoreRefresh:
+    """按当前 ``[score]`` 信号表给全库重新打分，写进 ``job_scores``。
+
+    每次都是**整表重写**：分数之间有关系（``rank`` 是全库排名），
+    只更新一部分留下的排名是错的，而且错得看不出来。
+    """
+    result = score_all(db, settings)
+    scored = result.jobs
     ScoreRepository(db).replace_all(
         [
             ScoreEntry(
@@ -171,7 +181,7 @@ def refresh(db: Database, settings: Settings) -> ScoreRefresh:
             )
             for index, job in enumerate(scored, 1)
         ],
-        fingerprint,
+        result.fingerprint,
     )
-    logger.debug("刷新 %d 条分数，去重后 %d 条", len(scored), len(unique))
-    return ScoreRefresh(jobs=scored, unique_ids=unique, fingerprint=fingerprint)
+    logger.debug("刷新 %d 条分数，去重后 %d 条", len(scored), len(result.unique_ids))
+    return result

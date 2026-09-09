@@ -18,6 +18,7 @@ from job_agent.core.storage import (
     Database,
     DetailRepository,
     JobRepository,
+    LlmScoreRepository,
     ScoreRepository,
 )
 from job_agent.errors import ConfigError
@@ -36,6 +37,7 @@ class AppContext(BaseModel):
     details: DetailRepository
     applications: ApplicationRepository
     scores: ScoreRepository
+    llm_scores: LlmScoreRepository
 
     @classmethod
     def create(
@@ -72,6 +74,7 @@ class AppContext(BaseModel):
             details=DetailRepository(db),
             applications=ApplicationRepository(db),
             scores=ScoreRepository(db),
+            llm_scores=LlmScoreRepository(db),
         )
 
     def reload_settings(self) -> Settings:

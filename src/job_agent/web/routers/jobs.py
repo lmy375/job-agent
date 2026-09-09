@@ -31,6 +31,9 @@ def list_jobs(
         float | None, Query(ge=0, description="年薪上限不低于该值（万元）")
     ] = None,
     scored: Annotated[bool | None, Query(description="是否已打分（job score 落库的）")] = None,
+    llm_scored: Annotated[
+        bool | None, Query(description="是否已 LLM 打分（挑「还没打过的那批」时用）")
+    ] = None,
     order: Annotated[
         Literal["score", "recent", "salary", "salary_asc"],
         Query(description="排序方式。截断时决定留下哪些，细排序前端自己做"),
@@ -50,6 +53,7 @@ def list_jobs(
             applied=applied,
             min_salary=min_salary,
             scored=scored,
+            llm_scored=llm_scored,
             order=order,
             limit=limit,
         )

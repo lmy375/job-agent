@@ -55,6 +55,18 @@ class JobRow(BaseModel):
     scorePenalties: list[str] = Field(default_factory=list)
     scoredAt: datetime | None = None
 
+    # ---- 以下来自 llm_scores（LEFT JOIN，没送过模型就整块是 None / 空）
+    #: 岗位吸引力（1-10，从求职者角度）
+    llmAppeal: int | None = None
+    #: 胜任匹配度（1-10，从招聘方角度）
+    llmFit: int | None = None
+    llmAppealReasons: list[str] = Field(default_factory=list)
+    llmFitReasons: list[str] = Field(default_factory=list)
+    #: 判这条的模型。分数换了模型就不可比，所以逐行记
+    llmProvider: str | None = None
+    llmModel: str | None = None
+    llmScoredAt: datetime | None = None
+
 
 class JobDetailRow(ParsedDetail):
     """``job_details`` 表的一行：解析出的 JD 字段 + 落库时才有的身份与状态。
@@ -135,6 +147,45 @@ class ScoreEntry(BaseModel):
     offTrack: bool = False
     hits: list[str] = Field(default_factory=list)
     penalties: list[str] = Field(default_factory=list)
+
+
+class LlmScoreEntry(BaseModel):
+    """一条要落库的 LLM 打分结果。仓储收它，不收裸 dict。
+
+    刻意**不含** provider / model / promptFingerprint / scoredAt：
+    同一次运行里这四样对所有行都一样，由仓储统一盖章——
+    让调用方逐行填一遍，迟早会出现半张表盖 A、半张表盖 B。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    jobId: int
+    appealScore: int = Field(ge=1, le=10)
+    fitScore: int = Field(ge=1, le=10)
+    appealReasons: list[str] = Field(default_factory=list)
+    fitReasons: list[str] = Field(default_factory=list)
+
+
+class LlmScoreStatus(BaseModel):
+    """LLM 打分的覆盖率与新鲜度。
+
+    和 :class:`ScoreStatus` 的关键差别：``missing`` 在这里**不是问题**。
+    关键词打分是全库刷新，漏一条就是没跑；LLM 打分按条计费，
+    「大部分没打过」是常态，所以这里只报覆盖率，不报「该重打了」。
+    ``stale`` 才是要提醒的：已打过的行里有换了模型或改了提示词的。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: 库里有 JD、够格送模型的条数
+    scorable: int = 0
+    #: 已打过分的条数
+    scored: int = 0
+    #: 已打分的行里，用当前提示词 + 当前模型判的有几条
+    current: int = 0
+    #: 存在用别的提示词或别的模型判出来的分数——它们和现在这批不可比
+    stale: bool = False
+    scoredAt: datetime | None = None
 
 
 class ScoreStatus(BaseModel):

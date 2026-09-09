@@ -10,16 +10,24 @@
 | 环节性质 | 归属 | 判据 |
 | --- | --- | --- |
 | 结论必须可重跑、可测试、两次一样 | **CLI**（`src/job_agent/`） | 采集、限流退避、去重、JD 解析、薪资换算、规则打分与落库、排序 |
-| 需要读懂文字才能下判断 | **Skill**（`.claude/skills/`） | 读 JD 比硬门槛、简历措辞体检、排投递优先级、写面试口径 |
-| 随人而变 | **Profile**（`profiles/<名字>/`） | 简历、求职偏好、搜索关键词、匹配信号表 |
+| 需要读懂文字，但每条独立、结果要**存下来复用** | **CLI 里的判断层** | `job llm-score`：读 JD 比硬门槛、给两个维度打分并落库 |
+| 需要读懂文字，且要跨岗位权衡、边聊边改 | **Skill**（`.claude/skills/`） | 排投递优先级、简历措辞体检、写面试口径 |
+| 随人而变 | **Profile**（`profiles/<名字>/`） | 简历、求职偏好、搜索关键词、匹配信号表、打分提示词 |
+
+第二行是后加的一档，边界要说清楚：**LLM 打分进代码，不是因为它确定性
+（它不是），而是因为它「一条一判、结果要存」。** 判断本身交给模型，但「打哪些、
+并发多少、已经打过的跳不跳、结果存哪、什么时候算过期」全是确定性的编排，
+每一条都有唯一正确答案。而 `/job-match` 那种「这八条里先投哪三个」要同时看
+全部候选、还要跟人来回改口径，存不下来，所以留在 skill。
 
 推论，违反了就是设计错误：
 
 - **换一个用户，只应该换一个 profile，不该改代码。** 任何「AI Agent 是好岗位」
   这类个人取向，一旦出现在 `src/` 里就是 bug——它属于配置。
 - **不要把判断写成代码。** 「这个岗要 50 人管理经验而候选人带 5 人」是判断，
-  归 skill；「按薪资上限降序排」是规则，归 CLI。
-  打分只负责**分诊**（把几百条砍到几十条），不负责下结论。
+  不许写成正则或阈值；它要么交给 skill，要么**交给模型**（`job llm-score`），
+  但两种情况下代码本身都不含任何取向。「按薪资上限降序排」是规则，归 CLI。
+  关键词打分只负责**分诊**（把几百条砍到几十条），不负责下结论。
 - **不要把确定性交给模型。** 去重、薪资解析、打分排序这类有唯一正确答案的事，
   必须是代码，不能让 Claude 每次现算——现算的结果不可比。
 - **薪资只有一种口径：税前。** JD 标税前，配置里也一律填税前，不做税后换算——
@@ -92,8 +100,15 @@ CLI 把稳定的骨架固化下来，skill 把「怎么判断」的经验固化�
 - **agent 路线里 LLM 只出现在判断节点**（`agent/nodes.py` 的 review：读 JD 比
   硬门槛、写投递口径）。采集、分诊、排序、计划渲染全部复用内核或纯函数——
   两条路线跑同一份数据得到同一个 shortlist。
-- **prompt 只写方法论**（`agent/prompts.py`）。个人取向仍然全部来自 `config/`，
-  「换用户只改 config」对两条路线同时成立。
+- **模型客户端住共享内核**（`core/llm/`），不住任何一条路线里。现在调模型的地方
+  有两处：agent 的审读节点，和 CLI/Web 的 `job llm-score`。边界规则不许 `cli/`
+  `web/` import `agent/`，所以客户端只能在 `core/`——照「可复用的一律下沉」办。
+  它因此**不收 `Settings`**，只收一个 `ModelProvider`：哪个段选中了哪个接入点，
+  是调用方的事，客户端不该知道有 `[agent]` 还是 `[llm_score]` 这回事。
+- **prompt 只写方法论**（`agent/prompts.py`、`core/llm/prompts.py`）。个人取向
+  仍然全部来自 `config/`，「换用户只改 config」对两条路线同时成立。
+  LLM 打分的两段方法论还额外允许用户整段替换（profile 里的两个 md），
+  但输出要求与 JSON Schema 那一截永远由代码拼——用户改不坏结构化输出。
 - **审读用哪家模型是配置，不是代码。** `[agent.providers.*]` 一张表一个接入点
   （Claude / ChatGPT / DeepSeek / Kimi…），`[agent].provider` 指哪个用哪个。
   客户端只有两类：`api = "anthropic"`（Claude 原生协议）与 `api = "openai"`
@@ -105,8 +120,8 @@ CLI 把稳定的骨架固化下来，skill 把「怎么判断」的经验固化�
   变，所以绝不按 provider 名在代码里硬猜。`json_mode` 下 langchain 不发 schema，
   由 `prompts.review_system_message()` 把 schema 附进 prompt。
 - **换了模型，产出要能看出来。** 模型标识（`provider / model`）进 `AgentState`
-  并写进投递计划头部——裁决口径随模型变，事后回看得能分清「优先级变了」是
-  JD 变了还是换了模型。
+  并写进投递计划头部；LLM 打分则**逐行**存进 `llm_scores`——裁决口径随模型变，
+  事后回看得能分清「优先级变了」是 JD 变了还是换了模型。
 - agent 路线的模型 API key 与 LangSmith key（可选的运行追踪）跟猎聘 token
   同规矩：都住 `config/config.toml`（`[agent.providers.*]` / `[agent.langsmith]`
   / `[liepin]`）。
@@ -135,7 +150,7 @@ profiles/              # 整个目录不进版本库
 
 | 文件 | 段 | 一句话 |
 | --- | --- | --- |
-| `config/config.toml` | `[profiles]`、`[liepin]`（含 `[liepin.accounts.*]`）、`[detail]`、`[agent]`（含 `.providers.*` / `.langsmith`）、`[web]`、`[logging]` | 管**怎么连**，跟人无关 |
+| `config/config.toml` | `[profiles]`、`[liepin]`（含 `[liepin.accounts.*]`）、`[detail]`、`[agent]`（含 `.providers.*` / `.langsmith`）、`[llm_score]`、`[web]`、`[logging]` | 管**怎么连**，跟人无关 |
 | `profiles/<名>/profile.toml` | `[profile]`、`[search]`、`[storage]`、`[score]` | 管**找什么**，随人而变 |
 
 不重叠是刻意的，也是硬约束（`tests/test_boundaries.py` 会强制）：同一个段要是能出现在
@@ -157,21 +172,33 @@ loader 再按段名告诉你它该在哪个文件里。段不重叠还保证了�
   那个名字会被 pydantic-settings 当成给 `[profile]` 整段赋 JSON。）
 - **代码里不出现任何 profile 名字，也不拼 `data/jobs.db` 这类路径**——
   一律问 `settings`。skill 与外部脚本用 `job config path --json`。
-- **profile 内部不要再多层文件。** 信号表、搜索关键词、门槛都在 `profile.toml`
-  的段里；`profile.toml` / `resume.md` / `preferences.md` 三个文件的分界是
-  **格式**（结构化 TOML vs 自由 Markdown），不是话题。加一段配置就加个段，
-  不要再开第四个文件。
-- **Web 端能改配置，但改的仍然是文件。** 管理台的「配置」页只放两样：
-  `[search].keywords` 与 `[score]`——求职过程里真正要反复调的就是「搜什么词」
-  和「什么算对口」，为了改一个权重去翻 TOML 是把最高频的动作放到了最远的地方。
-  保存 = 写回 `profiles/<名>/profile.toml` 再 `reload_settings()`，
+- **profile 内部按格式分文件，不按话题分。** 信号表、搜索关键词、门槛都在
+  `profile.toml` 的段里；`resume.md` / `preferences.md` 是自由 Markdown。
+  分界是**格式**（结构化 TOML vs 自由 Markdown），不是话题——
+  加一项结构化配置就加个段，不要为它单开一个文件。
+  LLM 打分的两段提示词（`score_appeal.md` / `score_fit.md`）按这条规矩归 Markdown：
+  它们是几百字的自由文本，塞进 TOML 多行字符串只会让缩进和转义变成新的坑。
+  它们和前两个 md 还有一点不同——**默认不存在**。默认值在 `src/` 里
+  （方法论，与人无关），profile 里的文件只是**覆盖**。所以
+  `config/templates/` 刻意不铺这两个文件：铺了每个新 profile 一出生就处在
+  「覆盖态」，以后改进内置方法论一份也传不下去。
+- **Web 端能改配置，但改的仍然是文件。** 管理台的「配置」页只放三样：
+  `[search].keywords`、`[score]`，与 **LLM 打分的两段提示词**。
+  判据是「它是不是**判断口径**」——搜什么词、什么算对口、怎么判断一个岗好不好
+  和自己够不够格，这三样是求职过程里真正要反复调的，为了改一个权重或一句话
+  去翻文件，是把最高频的动作放到了最远的地方。
+  保存 = 写回 profile 目录下的文件再 `reload_settings()`，
   **不在内存里攒一份改动**：生效的永远是文件里那份，CLI、Web、agent 读同一份，
   「网页上改了但 CLI 跑的是另一套」从根上不成立。写回是**定点替换**
   （`config/writer.py`）：`keywords` 只动数组那几行，`[score]` 整段重写，
   段外的注释一个字节不动——profile.toml 里的注释是用户唯一的说明书，
   所以刻意不引 TOML 写库（那会把全文重排一遍），同 `job profile use` 的做法。
-  其余配置不给写接口：token、模型接入点、限速属于「怎么连」，一次配好就不动，
-  也不该有回显密钥的接口。要加第三个可编辑项之前，先问它是不是也这么高频。
+  提示词是整份 md，直接原子替换；**内容为空或与内置默认逐字相同就删文件**——
+  存一份空提示词会让模型收到一段没有方法论的 system，存一份和默认一样的
+  会让以后改进默认时传不下去。
+  其余配置不给写接口：token、模型接入点、并发、限速属于「怎么连」，
+  一次配好就不动，也不该有回显密钥的接口。
+  要加第四个可编辑项之前，先问它是不是也是判断口径、是不是也这么高频。
 - **profile 内部不要再按方向分层。** `[search].keywords` 是扁平数组，
   不是「按赛道分组的关键词表」——想同时跑两条线就开两个 profile。
   曾经有过 `[[search.groups]]`（带 `track` 标签与 `enabled` 开关），
@@ -193,7 +220,8 @@ job -p web3 search        # 任何命令都能 -p 指定
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
 job search → job score → job score -o → /job-match → job apply
-          ↘ job web （翻 JD、看库存、点投递、改关键词与打分逻辑、重新打分）
+          ↘ job llm-score --top 30   （可选：模型给两个维度打分并落库）
+          ↘ job web （翻 JD、看库存、点投递、改关键词/打分逻辑/提示词、批量打分）
 
 job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守版，
                                               # 与 CLI 共享同一个 profile 目录
@@ -224,6 +252,42 @@ job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守
 它刻意不进后台任务队列：队列存在的理由（猎聘限流按 token 记账、串行才安全）
 对打分不成立，打分不发请求、几千条一两秒。
 
+### LLM 打分（`job llm-score`）：判断进代码，但编排仍然是确定性的
+
+关键词打分读不出「JD 说要 50 人管理经验」，所以有第二层：让模型读 JD 与简历，
+打**两个维度**的分，各 1-10 分并附一条或多条依据。落 `llm_scores` 表。
+
+**两个维度并列，绝不合成总分**（`appeal` 岗位吸引力 / `fit` 胜任匹配度）。
+它们回答的是两个不相干的问题：一个是「这份工作值不值」，一个是「你够不够格」。
+合成之后「够不着的好岗」和「够得着的烂岗」算出来一样高，而这两种情况该做的事
+完全相反。真要合成，权重多少也是取向，写进 `src/` 就是 bug。
+
+和 `job score` 的分工是**刷新语义**上的，两张表不能合并：
+
+| | `job_scores` | `llm_scores` |
+| --- | --- | --- |
+| 写法 | 整表重写 | 按条 upsert |
+| 存排名 | 存（`rank` 是全库名次） | **不存**——表天然残缺，名次是「全量重算」才有的概念 |
+| 默认范围 | 全库 | **必须显式指定**，没有「不传就全打」 |
+| 过期判据 | `[score]` 指纹 | 提示词指纹 + `provider` + `model` |
+
+几条不许改的：
+
+- **「必须显式指定」在每个入口都成立。** CLI 不给 jobId / `--top` / `--all` 就
+  退出 2；`POST /api/tasks` 的 `llm_score` 没有 `job_ids` 就 400。按条计费的事，
+  「忘了带参数」不该能触发。
+- **口径没变的默认跳过**（同 provider + 同 model + 同提示词指纹），`--force` 才重打。
+  换了任意一样就不跳过——旧分数和新的不可比。
+- **单条失败不落库、也不拖垮整批**；只有 `JobAgentError`（缺 key、装错包这类
+  整批都跑不动的）才往上抛。表里有行就等于有一份有效分数，不必再判 status 列。
+- **打分不许顺手重写 `job_scores`。** 挑「前 N 条」用的是 `score_all()`（内存里
+  现算、不落库），库里的名次什么时候变由 `job score` 说了算。
+- **`job stats` / Web 概览不把「还没打的」报成待办。** 按条计费，覆盖不全是常态，
+  天天喊「还差 3000 条」只会让人学会忽略它。要报的是 `stale`：库里混着别的模型
+  或旧提示词判出来的分数，那些和现在这批没法比。
+- **Web 端它进后台任务队列，而 `job score` 不进。** 判据是「会不会发请求」，
+  不是「慢不慢」。
+
 对应的配置：
 
 | 文件 | 管什么 | 谁生成 |
@@ -232,6 +296,7 @@ job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守
 | `profiles/<名>/profile.toml` | 搜索条件、搜索关键词、`[score]` 打分门槛与匹配信号表 | `job profile new` + `/job-init` |
 | `profiles/<名>/resume.md` | 简历（`job resume import` 抽文本，skill 整理） | `/job-init` |
 | `profiles/<名>/preferences.md` | 硬约束、薪资口径与底线、面试口径 | `/job-init` |
+| `profiles/<名>/score_appeal.md`、`score_fit.md` | LLM 打分两个维度的方法论**覆盖**（可选，不存在就用 `src/` 里的内置默认） | Web 配置页 / 手写 |
 
 `profile.toml` 的 `[score]` 段是「换用户只改配置」这条承诺的关键：
 它编码的是个人取向（对做应用工程的人「预训练」是 −12，对做算法的人是 +12），
@@ -250,7 +315,8 @@ job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守
 
 - 投递之后的事：面试进度、offer 对比、复盘，目前都在系统外
 - `job score` 的信号是关键词命中，读不出「JD 说要 50 人管理经验」这类语义门槛
-  ——这是刻意的，那部分归 `/job-match` skill
+  ——这是刻意的，那部分归 `job llm-score`（每条独立、结果落库）
+  与 `/job-match` skill（跨岗位权衡、边聊边改）
 
 ## 硬规则
 

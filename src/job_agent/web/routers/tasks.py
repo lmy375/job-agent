@@ -1,4 +1,9 @@
-"""后台采集任务的提交与查询。"""
+"""后台任务的提交与查询。
+
+队列里跑的都是**会发网络请求**的长活：采集（猎聘接口 / 详情页）与 LLM 打分
+（按条调模型 API）。``[score]`` 重新打分刻意不进来——它不发请求、几千条一两秒，
+排队只会让人多等一次轮询。
+"""
 
 from __future__ import annotations
 
@@ -7,11 +12,13 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException
 
 from job_agent.context import AppContext
+from job_agent.core.matching import build_scorer
 from job_agent.core.services import DetailService, SearchService
 from job_agent.web.deps import ContextDep, TasksDep
 from job_agent.web.schemas import (
     CreateTaskRequest,
     DetailTaskResult,
+    LlmScoreTaskResult,
     SearchKeywordResult,
     SearchTaskResult,
     TaskDetail,
@@ -47,17 +54,12 @@ def get_task(tasks: TasksDep, task_id: str) -> TaskResponse:
 def create_task(
     payload: CreateTaskRequest, context: ContextDep, tasks: TasksDep
 ) -> TaskResponse:
-    """任务排队执行（只有一个 worker）：猎聘限流按 token 记账，并行只会更快被封。"""
-    needs_token = payload.kind in (TaskKind.SEARCH, TaskKind.DETAIL)
-    if needs_token and not context.settings.account.user_token:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"猎聘账号 {context.settings.profile.account} 没配 user_token"
-                "（config/config.toml 的 [liepin.accounts.*]），无法执行采集任务"
-            ),
-        )
+    """任务排队执行（只有一个 worker）：猎聘限流按 token 记账，并行只会更快被封。
 
+    LLM 打分同样排队，但理由不同：它自己内部就按 ``[llm_score].concurrency``
+    并发了，再让两个批次并行只会更快撞上各家的 RPM 限流，也让进度条读不懂。
+    """
+    _check_credentials(payload, context)
     runner = _RUNNERS[payload.kind](payload, context, tasks)
     task = tasks.submit(payload.kind, runner, payload.params)
     return TaskResponse(task=TaskDetail.model_validate(task))
@@ -70,6 +72,36 @@ def cancel_task(tasks: TasksDep, task_id: str) -> TaskResponse:
     if task is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
     return TaskResponse(task=TaskDetail.model_validate(task))
+
+
+def _check_credentials(payload: CreateTaskRequest, context: AppContext) -> None:
+    """提交前就把「跑不动」的情况挡掉：排进队列再失败，人得等一轮轮询才知道。"""
+    settings = context.settings
+    if payload.kind in (TaskKind.SEARCH, TaskKind.DETAIL):
+        if not settings.account.user_token:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"猎聘账号 {settings.profile.account} 没配 user_token"
+                    "（config/config.toml 的 [liepin.accounts.*]），无法执行采集任务"
+                ),
+            )
+        return
+    if payload.kind is TaskKind.LLM_SCORE:
+        name = settings.llm_score_provider_name
+        if settings.llm_score_active.api_key is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"接入点 {name} 没配 api_key（config/config.toml 的 "
+                    f"[agent.providers.{name}]），无法调模型打分"
+                ),
+            )
+        if not payload.params.job_ids:
+            # 按条计费，「不传就全打」这种默认在任何入口都不该存在
+            raise HTTPException(
+                status_code=400, detail="LLM 打分必须指定 job_ids：按条计费，没有默认全打"
+            )
 
 
 # ------------------------------------------------------------------ runners
@@ -148,7 +180,42 @@ def _fetch_details(
     )
 
 
+def _llm_score_runner(
+    payload: CreateTaskRequest, context: AppContext, manager: TaskManager
+) -> Callable[[Task], TaskResult]:
+    """LLM 打分：和 ``job llm-score`` 走同一个 :func:`build_scorer`。
+
+    两个入口共用一份打分器，所以命令行和网页跑出来的分数必然是一套口径——
+    各写一份的下场是「网页上 7 分、命令行 8 分」，而且查不出为什么。
+    """
+
+    def run(task: Task) -> TaskResult:
+        scorer = build_scorer(
+            context.settings, context.db, context.llm_scores, manager.progress_hook(task)
+        )
+        summary = scorer.run(
+            payload.params.job_ids or [],
+            force=payload.params.llm_force,
+            concurrency=payload.params.llm_concurrency,
+            stop_check=lambda: task.cancelRequested,
+        )
+        return LlmScoreTaskResult(
+            requested=summary.requested,
+            scored=summary.scored,
+            skipped=summary.skipped,
+            failed=summary.failed,
+            cancelled=summary.cancelled,
+            provider=summary.provider,
+            model=summary.model,
+            fingerprint=summary.fingerprint,
+            errors=summary.errors,
+        )
+
+    return run
+
+
 _RUNNERS = {
     TaskKind.SEARCH: _search_runner,
     TaskKind.DETAIL: _detail_runner,
+    TaskKind.LLM_SCORE: _llm_score_runner,
 }

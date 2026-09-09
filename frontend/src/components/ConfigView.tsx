@@ -1,14 +1,21 @@
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
-import type { ConfigPaths, ConfigResponse, ScoreSettings, ScoreSignal } from "../types";
+import type {
+  ConfigPaths,
+  ConfigResponse,
+  PromptsResponse,
+  ScoreSettings,
+  ScoreSignal,
+} from "../types";
 import RescoreButton from "./RescoreButton";
 
 /**
- * 配置页：改**搜索关键词**与 **`[score]` 打分逻辑**，其余只读。
+ * 配置页：改**搜索关键词**、**`[score]` 打分逻辑**、**LLM 打分提示词**，其余只读。
  *
- * 能改的只有这两处不是偷懒：求职过程里真正需要反复调的就是「搜什么词」
- * 和「什么算对口」，为了改一个权重去翻 TOML 是把最高频的动作放到了最远的地方。
- * 猎聘 token、模型接入点、限速属于「怎么连」，一次配好就不动，也不该有回显密钥的接口。
+ * 能改的只有这三处不是偷懒：它们都是「判断口径」，是求职过程里真正要反复调的
+ * ——搜什么词、什么算对口、怎么判断一个岗好不好和自己够不够格。为了改一个权重
+ * 或一句话去翻文件，是把最高频的动作放到了最远的地方。猎聘 token、模型接入点、
+ * 并发、限速属于「怎么连」，一次配好就不动，也不该有回显密钥的接口。
  *
  * **保存就是改文件**：写回 `profiles/<名>/profile.toml` 再重新加载，
  * 所以 CLI、Web、agent 三条路读的永远是同一份——不存在「网页上改了但
@@ -107,6 +114,11 @@ export default function ConfigView() {
   const [tokenReady, setTokenReady] = useState(false);
   const [search, setSearch] = useState<{ address: string | null; salary: string } | null>(null);
   const [rateLimit, setRateLimit] = useState(0);
+  const [llmProvider, setLlmProvider] = useState("");
+  const [llmConcurrency, setLlmConcurrency] = useState(0);
+  const [prompts, setPrompts] = useState<PromptsResponse | null>(null);
+  const [appealText, setAppealText] = useState("");
+  const [fitText, setFitText] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [saving, setSaving] = useState("");
@@ -126,10 +138,20 @@ export default function ConfigView() {
       }`,
     });
     setRateLimit(settings.liepin.rate_limit_per_min);
+    setLlmProvider(settings.llm_score.provider ?? "（跟随 [agent].provider）");
+    setLlmConcurrency(settings.llm_score.concurrency);
+  };
+
+  /** 提示词也用一次响应把两个编辑框填满，保存后同样走它。 */
+  const applyPrompts = (data: PromptsResponse) => {
+    setPrompts(data);
+    setAppealText(data.appeal.content);
+    setFitText(data.fit.content);
   };
 
   useEffect(() => {
     api.config().then(apply).catch((e: unknown) => setError(errorMessage(e)));
+    api.prompts().then(applyPrompts).catch((e: unknown) => setError(errorMessage(e)));
   }, []);
 
   const saveKeywords = async () => {
@@ -171,6 +193,24 @@ export default function ConfigView() {
       setNotice(
         `打分逻辑已写进 ${config.paths.profileFile}。` +
           "库里的分数还是上一次算的——点「重新打分」才会按新规则重算全库排名。"
+      );
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSaving("");
+    }
+  };
+
+  const savePrompts = async () => {
+    setSaving("prompts");
+    setError("");
+    setNotice("");
+    try {
+      const data = await api.updatePrompts({ appeal: appealText, fit: fitText });
+      applyPrompts(data);
+      setNotice(
+        "提示词已保存。库里已有的 LLM 分数是按旧提示词判的，" +
+          "和新的不可比——想要一套口径就到「职位」页重新打一遍。"
       );
     } catch (e) {
       setError(errorMessage(e));
@@ -360,6 +400,39 @@ export default function ConfigView() {
         </section>
       )}
 
+      {prompts && (
+        <section className="panel">
+          <h3>LLM 打分提示词</h3>
+          <p className="muted">
+            两段各管一个维度，模型一次调用同时给出两个分。这里写的是<b>方法论</b>
+            （怎么判断），「你想去什么方向、什么不看」不用写在这里——简历与
+            <code>preferences.md</code> 会一起发给模型。留空 = 恢复内置默认；
+            输出格式那一截由代码拼，改不坏。当前模型：<code>{prompts.modelLabel}</code>
+            ，提示词指纹 <code>{prompts.fingerprint}</code>。
+          </p>
+          <PromptEditor
+            title="维度一 · 岗位吸引力"
+            hint="从求职者角度：薪资水位、公司体量与阶段、JD 写得专不专业、业务靠不靠谱、是否落在你的方向里。"
+            view={prompts.appeal}
+            value={appealText}
+            onChange={setAppealText}
+          />
+          <PromptEditor
+            title="维度二 · 胜任匹配度"
+            hint="从招聘方角度：硬门槛过不过、核心经历贴不贴、技术栈和职级差多少——拿到这份工作的概率。"
+            view={prompts.fit}
+            value={fitText}
+            onChange={setFitText}
+          />
+          <div className="form-actions">
+            <button className="btn" disabled={saving !== ""} onClick={savePrompts}>
+              {saving === "prompts" ? "保存中…" : "保存提示词"}
+            </button>
+            <span className="muted">并发 {llmConcurrency} · 接入点 {llmProvider}（只读）</span>
+          </div>
+        </section>
+      )}
+
       {paths && (
         <>
           <h3 className="section-title">路径与账号（只读）</h3>
@@ -372,6 +445,8 @@ export default function ConfigView() {
                 <Row k="数据库" v={paths.database} />
                 <Row k="简历" v={paths.resume} />
                 <Row k="求职偏好" v={paths.preferences} />
+                <Row k="打分提示词（吸引力）" v={promptPath(paths.appealPrompt, prompts?.appeal.isDefault)} />
+                <Row k="打分提示词（胜任度）" v={promptPath(paths.fitPrompt, prompts?.fit.isDefault)} />
                 <Row k="猎聘账号" v={`${account}（token ${tokenReady ? "已配置" : "未配置"}）`} />
                 <Row k="搜索地点" v={search?.address ?? null} />
                 <Row k="搜索薪资门槛" v={search?.salary ?? null} />
@@ -383,6 +458,47 @@ export default function ConfigView() {
       )}
     </>
   );
+}
+
+/**
+ * 一个维度的提示词编辑框。
+ *
+ * 内置默认也照样把全文填进来（而不是留空 + 一句「用的是默认」）：
+ * 要改就得先看见改什么，让人先去仓库里翻一遍默认提示词是最没必要的一步。
+ */
+function PromptEditor({
+  title,
+  hint,
+  view,
+  value,
+  onChange,
+}: {
+  title: string;
+  hint: string;
+  view: { isDefault: boolean; path: string };
+  value: string;
+  onChange: (text: string) => void;
+}) {
+  return (
+    <div className="prompt-editor">
+      <label>
+        <span>
+          {title}
+          <span className={view.isDefault ? "badge" : "badge warn"} title={view.path}>
+            {view.isDefault ? "内置默认" : "已自定义"}
+          </span>
+        </span>
+        <textarea className="mono" rows={12} value={value} onChange={(e) => onChange(e.target.value)} />
+      </label>
+      <p className="muted">{hint}</p>
+    </div>
+  );
+}
+
+/** 提示词文件那一行：文件不存在很正常，得说清楚「不存在 = 用内置默认」。 */
+function promptPath(path: string, isDefault: boolean | undefined): string {
+  if (isDefault === undefined) return path;
+  return isDefault ? `${path}（不存在，用内置默认）` : path;
 }
 
 /** 配置表的一行。`v` 可能是 null（比如没有全局配置文件），渲染成空格子。 */

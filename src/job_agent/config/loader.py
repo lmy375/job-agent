@@ -54,6 +54,8 @@ _ROOT_PATH_FIELDS: tuple[tuple[str, str], ...] = (
 _PROFILE_PATH_FIELDS: tuple[tuple[str, str], ...] = (
     ("profile", "resume"),
     ("profile", "preferences"),
+    ("profile", "score_appeal_prompt"),
+    ("profile", "score_fit_prompt"),
     ("storage", "database"),
     ("agent", "checkpoint"),
     ("agent", "plan_output"),
@@ -275,6 +277,7 @@ def load_settings(
             liepin=global_settings.liepin,
             detail=global_settings.detail,
             agent=global_settings.agent,
+            llm_score=global_settings.llm_score,
             web=global_settings.web,
             logging=global_settings.logging,
             profile=profile_settings.profile,

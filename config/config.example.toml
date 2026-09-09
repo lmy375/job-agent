@@ -122,6 +122,22 @@ structured_output = "function_calling"
 # base_url = "https://litellm.example.com/v1"
 # structured_output = "function_calling"
 
+# ------------------------------------------------------- LLM 打分（job llm-score）
+# 让模型给职位打两个维度的分：岗位吸引力（这份工作本身值多少分）与胜任匹配度
+# （你拿到它的概率），各 1-10 分并附依据。两个分数并列落库，不合成总分。
+#
+# 单独一段而不是塞进 [agent]，因为这是两笔账：审读一次判三十条，
+# 打分动辄几百上千条。所以它常常想用更便宜的模型、开更大的并发。
+#
+# 判断依据（方法论提示词）不在这里：它是自由 Markdown，住
+# profiles/<名字>/score_appeal.md 与 score_fit.md——**不建这两个文件就用内置默认**。
+# 在 Web 的「配置」页能直接改，改完库里已有的分数就算过期（提示词指纹变了）。
+[llm_score]
+# 用上面 [agent.providers.*] 里的哪个接入点。**留空 = 跟随 [agent].provider**。
+# 想用便宜模型批量打分就在这里单独指一个，比如 provider = "deepseek"
+provider = ""
+concurrency = 4           # 并发调用上限（1-16）。再高多半先撞上各家的 RPM 限流
+
 # LangSmith 运行追踪（可选）：填了 api_key 就启用，留空就完全不上报。
 # 只有一个必填项，不存在「配了一半、SDK 静默不上报」那种查不出原因的中间态。
 # key 在 https://smith.langchain.com 的 Settings → API Keys 里生成。

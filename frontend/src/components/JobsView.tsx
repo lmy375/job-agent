@@ -18,6 +18,8 @@ import RescoreButton from "./RescoreButton";
 type SortKey =
   | "scoreRank"
   | "score"
+  | "llmAppeal"
+  | "llmFit"
   | "jobName"
   | "jobType"
   | "company"
@@ -42,6 +44,8 @@ interface Column {
 const COLUMNS: Column[] = [
   { key: "scoreRank", label: "#", get: (j) => j.scoreRank, numeric: true, className: "rank" },
   { key: "score", label: "分", get: (j) => j.score, numeric: true, className: "score" },
+  { key: "llmAppeal", label: "吸引", get: (j) => j.llmAppeal, numeric: true, className: "score" },
+  { key: "llmFit", label: "胜任", get: (j) => j.llmFit, numeric: true, className: "score" },
   { key: "jobName", label: "职位", get: (j) => j.jobName },
   { key: "jobType", label: "来源", get: (j) => jobKindLabel(j.jobType) },
   { key: "company", label: "公司", get: (j) => j.company },
@@ -64,6 +68,7 @@ interface Filters {
   min_salary: string;
   has_detail: string;
   applied: string;
+  llm_scored: string;
 }
 
 interface Sort {
@@ -73,7 +78,7 @@ interface Sort {
 
 const EMPTY: JobListResponse = { total: 0, limit: 0, jobs: [] };
 
-export default function JobsView() {
+export default function JobsView({ onTaskCreated }: { onTaskCreated?: () => void }) {
   const [keywords, setKeywords] = useState<KeywordCount[]>([]);
   const [filters, setFilters] = useState<Filters>({
     keyword: "",
@@ -82,6 +87,7 @@ export default function JobsView() {
     min_salary: "",
     has_detail: "",
     applied: "",
+    llm_scored: "",
   });
   //: 排序状态：列 key + 方向。默认按分数从高到低（分诊结果就是拿来这么看的）
   const [sort, setSort] = useState<Sort>({ key: "score", desc: true });
@@ -92,6 +98,9 @@ export default function JobsView() {
   const [detail, setDetail] = useState<JobBundle | null>(null);
   const [applying, setApplying] = useState<number | null>(null);
   const [notice, setNotice] = useState("");
+  //: 勾中的 jobId。LLM 打分按条计费，所以「打哪些」必须是人明确选出来的
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     api.keywords().then((d) => setKeywords(d.keywords)).catch(() => {});
@@ -114,7 +123,12 @@ export default function JobsView() {
     return () => clearTimeout(timer);
   }, [load]);
 
-  const update = (patch: Partial<Filters>) => setFilters((prev) => ({ ...prev, ...patch }));
+  //: 换筛选条件就清空勾选：勾了 30 条、一改关键词只剩 3 条在屏幕上，
+  //: 然后点「给选中的打分」——花的是那 30 条的钱，看不见的那 27 条最容易出事
+  const update = (patch: Partial<Filters>) => {
+    setSelected(new Set());
+    setFilters((prev) => ({ ...prev, ...patch }));
+  };
 
   const toggleSort = (key: SortKey) => {
     setSort((prev) => {
@@ -142,6 +156,41 @@ export default function JobsView() {
       return String(x).localeCompare(String(y), "zh") * dir;
     });
   }, [data.jobs, sort]);
+
+  const toggleOne = (jobId: number) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(jobId)) next.add(jobId);
+      return next;
+    });
+  };
+
+  const allSelected = sorted.length > 0 && sorted.every((j) => selected.has(j.jobId));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(sorted.map((j) => j.jobId)));
+
+  /** 把一批 jobId 送进 LLM 打分任务。**按条计费，所以每次都要人点头。** */
+  const runLlmScore = async (ids: number[]) => {
+    if (!ids.length) return;
+    const ok = window.confirm(
+      `将对 ${ids.length} 条职位调用模型打分。\n\n` +
+        "按条计费；同模型、同提示词已经打过的会自动跳过。\n" +
+        "任务在后台跑，进度和日志在「采集任务」页看，可以随时取消。"
+    );
+    if (!ok) return;
+    setSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      const { task } = await api.createTask({ kind: "llm_score", params: { job_ids: ids } });
+      setNotice(`已提交 LLM 打分任务 ${task.id}（${ids.length} 条），去「采集任务」看进度。`);
+      setSelected(new Set());
+      onTaskCreated?.();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const toggleDetail = async (jobId: number) => {
     if (expanded === jobId) {
@@ -216,6 +265,14 @@ export default function JobsView() {
           <option value="true">已投递</option>
           <option value="false">未投递</option>
         </select>
+        <select
+          value={filters.llm_scored}
+          onChange={(e) => update({ llm_scored: e.target.value })}
+        >
+          <option value="">LLM 打分：全部</option>
+          <option value="true">已打分</option>
+          <option value="false">未打分</option>
+        </select>
       </div>
 
       <div className="chips">
@@ -251,10 +308,41 @@ export default function JobsView() {
         <RescoreButton onDone={load} />
       </div>
 
+      <div className="bulkbar">
+        <span className={selected.size ? "" : "muted"}>已选 {selected.size} 条</span>
+        <button
+          className="btn small"
+          disabled={submitting || selected.size === 0}
+          onClick={() => runLlmScore([...selected])}
+          title="让模型给选中的职位打两个维度的分（岗位吸引力 / 胜任匹配度）"
+        >
+          {submitting ? "提交中…" : "给选中的 LLM 打分"}
+        </button>
+        <button
+          className="btn small ghost"
+          disabled={submitting || sorted.length === 0}
+          onClick={() => runLlmScore(sorted.map((j) => j.jobId))}
+          title="给当前筛选结果里的全部职位打分"
+        >
+          打分当前 {sorted.length} 条
+        </button>
+        <span className="muted">
+          按条计费，已用同一模型与提示词打过的会自动跳过；口径与提示词在「配置」页改。
+        </span>
+      </div>
+
       <div className="table-wrap">
         <table>
           <thead>
             <tr>
+              <th className="pick">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  title="全选当前筛选结果（换筛选条件会清空勾选）"
+                />
+              </th>
               {COLUMNS.map((c) => (
                 <th
                   key={c.key}
@@ -273,6 +361,13 @@ export default function JobsView() {
             {sorted.map((job) => (
               <Fragment key={job.jobId}>
                 <tr className={job.offTrack ? "off-track" : undefined}>
+                  <td className="pick">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(job.jobId)}
+                      onChange={() => toggleOne(job.jobId)}
+                    />
+                  </td>
                   <td className="rank">{job.scoreRank ?? "—"}</td>
                   <td className="score">
                     {job.score === null ? (
@@ -282,6 +377,12 @@ export default function JobsView() {
                     ) : (
                       <span title={scoreTitle(job)}>{Math.round(job.score)}</span>
                     )}
+                  </td>
+                  <td className="score">
+                    <LlmCell value={job.llmAppeal} reasons={job.llmAppealReasons} job={job} />
+                  </td>
+                  <td className="score">
+                    <LlmCell value={job.llmFit} reasons={job.llmFitReasons} job={job} />
                   </td>
                   <td className="job-name">
                     <button className="link" onClick={() => toggleDetail(job.jobId)}>
@@ -333,7 +434,7 @@ export default function JobsView() {
                 </tr>
                 {expanded === job.jobId && (
                   <tr className="detail-row">
-                    <td colSpan={COLUMNS.length + 1}>
+                    <td colSpan={COLUMNS.length + 2}>
                       {!detail && <div className="muted">加载中…</div>}
                       {detail && detail.jobId === job.jobId && <JobDetail detail={detail} />}
                     </td>
@@ -343,7 +444,7 @@ export default function JobsView() {
             ))}
             {sorted.length === 0 && !loading && (
               <tr>
-                <td colSpan={COLUMNS.length + 1} className="empty">
+                <td colSpan={COLUMNS.length + 2} className="empty">
                   没有数据。先在「采集任务」里跑一次搜索。
                 </td>
               </tr>
@@ -355,6 +456,32 @@ export default function JobsView() {
   );
 }
 
+/**
+ * 一个 LLM 分数格。没打过就是一个破折号——**不写 0**：
+ * 「没判过」和「判了 1 分」是两回事，混成同一个数字会让排序骗人。
+ */
+function LlmCell({
+  value,
+  reasons,
+  job,
+}: {
+  value: number | null;
+  reasons: string[];
+  job: JobRow;
+}) {
+  if (value === null) {
+    return (
+      <span className="muted" title="还没送模型打分：勾上这一行，点上面的「LLM 打分」">
+        —
+      </span>
+    );
+  }
+  const lines = [...reasons];
+  if (job.llmModel) lines.push(`模型：${job.llmProvider} / ${job.llmModel}`);
+  if (job.llmScoredAt) lines.push(`打分时间：${formatTime(job.llmScoredAt)}`);
+  return <span title={lines.join("\n")}>{value}</span>;
+}
+
 /** 悬停时把命中/扣分理由摆出来：分数本身不可信，理由才让人能复核排序。 */
 function scoreTitle(job: JobRow): string {
   const lines: string[] = [];
@@ -362,6 +489,20 @@ function scoreTitle(job: JobRow): string {
   if (job.scorePenalties.length) lines.push(`− ${job.scorePenalties.join("、")}`);
   if (job.scoredAt) lines.push(`打分时间：${formatTime(job.scoredAt)}`);
   return lines.join("\n") || "无命中信号";
+}
+
+function Reasons({ title, items }: { title: string; items: string[] }) {
+  if (!items.length) return null;
+  return (
+    <div className="reasons">
+      <span className="reasons-title">{title}</span>
+      <ul>
+        {items.map((text) => (
+          <li key={text}>{text}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function JobDetail({ detail }: { detail: JobBundle }) {
@@ -382,6 +523,22 @@ function JobDetail({ detail }: { detail: JobBundle }) {
             <span>扣分：{detail.scorePenalties.join("、")}</span>
           )}
           <span className="muted">分数只做分诊，该不该投要读下面的 JD</span>
+        </div>
+      )}
+      {detail.llmAppeal !== null && (
+        <div className="llm-verdict">
+          <div className="jd-meta">
+            <span>
+              岗位吸引力 <b>{detail.llmAppeal}</b>/10 · 胜任匹配度 <b>{detail.llmFit}</b>/10
+            </span>
+            <span className="muted">
+              {detail.llmProvider} / {detail.llmModel}
+              {detail.llmScoredAt ? ` · ${formatTime(detail.llmScoredAt)}` : ""}
+            </span>
+            <span className="muted">两个分数并列，不合成总分</span>
+          </div>
+          <Reasons title="值不值得投" items={detail.llmAppealReasons} />
+          <Reasons title="够不够得着" items={detail.llmFitReasons} />
         </div>
       )}
       {detail.applications.length > 0 && (

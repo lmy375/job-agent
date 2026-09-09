@@ -169,3 +169,46 @@ def test_secrets_never_serialize_in_clear(project_root):
     # 要用的时候仍然取得到明文
     assert settings.require_token() == "liepin-secret"
     assert settings.agent.langsmith.enabled
+
+
+def test_llm_score_defaults_follow_agent_provider(settings):
+    """[llm_score].provider 留空 = 跟随 [agent].provider，不用抄一遍接入点名字。"""
+    assert settings.llm_score.provider is None
+    assert settings.llm_score.concurrency == 4
+    assert settings.llm_score_provider_name == "anthropic"
+    assert settings.llm_score_active is settings.agent.active
+    assert settings.llm_score_model_label == "anthropic / claude-opus-5"
+
+
+def test_llm_score_can_pick_a_cheaper_provider(project_root):
+    """打分是按条计费的批量活，常常想用比审读便宜的模型，所以能单独指一个。"""
+    settings = load_with_global(
+        project_root,
+        '[agent]\nprovider = "anthropic"\n'
+        '[agent.providers.anthropic]\napi = "anthropic"\nmodel = "claude-opus-5"\n'
+        '[agent.providers.deepseek]\napi = "openai"\nmodel = "deepseek-chat"\n'
+        '[llm_score]\nprovider = "deepseek"\nconcurrency = 8\n',
+    )
+    assert settings.agent.model_label == "anthropic / claude-opus-5"
+    assert settings.llm_score_model_label == "deepseek / deepseek-chat"
+    assert settings.llm_score.concurrency == 8
+
+
+def test_llm_score_unknown_provider_rejected_at_load(project_root):
+    """跨段引用同样要在加载期就炸，而不是等真去调模型才失败。"""
+    with pytest.raises(ConfigError, match="没有对应的"):
+        load_with_global(
+            project_root,
+            '[agent.providers.anthropic]\napi = "anthropic"\nmodel = "claude-opus-5"\n'
+            '[llm_score]\nprovider = "kimi"\n',
+        )
+
+
+def test_prompt_paths_resolved_against_profile_dir(settings, profile_dir):
+    """提示词覆盖文件跟简历同一个待遇：路径写在配置里，代码不拼路径。"""
+    assert settings.profile.score_appeal_prompt == profile_dir / "score_appeal.md"
+    assert settings.profile.score_fit_prompt == profile_dir / "score_fit.md"
+    paths = settings.paths()
+    assert paths.appealPrompt == profile_dir / "score_appeal.md"
+    # 模板里刻意不铺这两个文件：铺了每个新 profile 一出生就是「覆盖态」
+    assert not paths.fitPrompt.exists()

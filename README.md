@@ -36,6 +36,7 @@ uv run job config init       # 生成全局配置 config/config.toml（密钥填
 uv run job profile new me    # 建一个 profile（简历、关键词、数据库都在它自己的目录里）
 uv run job search            # 采集职位（搜完自动抓 JD）
 uv run job score             # 按信号表重新打分、落库、排序（分诊）
+uv run job llm-score --top 30           # 让模型给前 30 条打两个维度的分（要填 API key）
 uv run job score -o data/shortlist.md   # 生成候选清单骨架
 uv run job web               # 打开 Web 管理台
 ```
@@ -61,7 +62,8 @@ uv run job profile use web3  # 把它设成默认，之后不用每次带 -p
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
 job search → job score → job score -o → /job-match → job apply
-          ↘ job web （翻 JD、看库存、点投递、改关键词与打分逻辑、重新打分）
+          ↘ job llm-score --top 30   （可选：让模型给两个维度打分，看得懂语义门槛）
+          ↘ job web （翻 JD、看库存、点投递、改关键词与打分逻辑、批量 LLM 打分）
 ```
 
 ## 目录结构
@@ -76,14 +78,17 @@ profiles/              随人而变的那一半，整个目录不进版本库
     profile.toml       搜索条件与关键词 + [score] 匹配信号表（正负信号 + 权重）
     resume.md          你的简历
     preferences.md     求职偏好（base 地 / 期望薪资 / 不看的岗位 / 面试口径）
-    data/              jobs.db（含 job_scores 表）、shortlist.md、agent-plan.md
+    score_appeal.md    LLM 打分维度一的提示词（可选，不存在就用内置默认）
+    score_fit.md       LLM 打分维度二的提示词（同上）
+    data/              jobs.db（含 job_scores / llm_scores 两张表）、shortlist.md、agent-plan.md
 src/job_agent/
   config/              配置加载与校验（TOML → 校验过的 Settings，密钥是 SecretStr）
   core/                核心能力，不依赖 CLI / Web
     liepin/            猎聘接口客户端（限速、错误码翻译、请求模型）
     storage/           SQLite：ORM 模型、仓储、轻量迁移
     services/          用例编排：search / detail / apply（带进度回调与取消）
-    matching/          按信号表打分排序、落库 + 候选清单骨架（只分诊，不下结论）
+    matching/          两套打分：按信号表分诊排序（scorer）+ LLM 语义打分（llm_scorer）
+    llm/               模型客户端与结构化输出适配 + LLM 打分的方法论提示词
     resume/            PDF / DOCX / TXT 简历 → 纯文本
     dataset.py         jobs × job_details → 打分用的行集合（去重、薪资换算）
     jd_parser.py       详情页 → 结构化 JD（纯函数）
@@ -112,7 +117,7 @@ tests/                 pytest（不碰真实库、不发网络请求）
 
 | 文件 | 管什么 | 段 |
 | --- | --- | --- |
-| `config/config.toml` | **怎么连**，跟人无关，全局一份 | `[profiles]`、`[liepin]`、`[detail]`、`[agent]`、`[web]`、`[logging]` |
+| `config/config.toml` | **怎么连**，跟人无关，全局一份 | `[profiles]`、`[liepin]`、`[detail]`、`[agent]`、`[llm_score]`、`[web]`、`[logging]` |
 | `profiles/<名>/profile.toml` | **找什么**，随人而变，一个 profile 一份 | `[profile]`、`[search]`、`[storage]`、`[score]` |
 
 - `config/config.toml`：全部密钥都在这（猎聘 token、模型 API key、LangSmith key）。
@@ -126,6 +131,9 @@ tests/                 pytest（不碰真实库、不发网络请求）
 - `profiles/<名>/resume.md`、`preferences.md`：你的简历与求职偏好。程序不解析它们，
   刻意保持自由格式 Markdown——它们是挑岗位、准备面试问答时的输入。
   `/job-init` 会带你写；模板见 `config/templates/`。
+- `profiles/<名>/score_appeal.md`、`score_fit.md`：LLM 打分两个维度的提示词。
+  **这两个文件默认不存在**——那表示用 `src/` 里的内置方法论。想改就建同名文件
+  （或在 Web 的「配置」页里改），内容整段替换默认，输出格式那一截仍由代码拼。
 - 用哪个 profile：`--profile` → `JOB_AGENT_PROFILE_NAME` → `[profiles].default`
   → 只有一个 profile 时就是它 → 报错列出候选。有两个及以上又没说用哪个时**绝不猜**。
   （环境变量刻意不叫 `JOB_AGENT_PROFILE`：那个名字会被 pydantic-settings
@@ -170,6 +178,10 @@ job search [-k 关键词]... [--pages N] [--limit N] [--retry-failed] [--no-deta
 job score [--floor 万] [-n N] [--why] [--json] [-o 路径] [--no-dedupe]
            # 每次都是「按最新 [score] 重新打分并写进库」，不是只读
            # -o 的相对路径按 profile 目录解析；配 --json 就是把 JSON 写进文件
+job llm-score [jobId...] [--top N] [--all] [--floor 万] [--force] [-j N]
+           [--provider P] [--model M] [--why] [--json] [-o 路径] [--yes]
+           # 让模型打两个维度的分（吸引力 / 胜任度，各 1-10 + 依据）
+           # 按条计费，所以**必须**用 jobId / --top / --all 说清楚打哪些
 job resume import <文件> [-o 输出路径] [--force]
 job apply <jobId>... [--job-kind 1|2] [--yes]
 job agent [--collect] [--apply] [-n N] [--provider P] [--model M] [--thread ID]
@@ -234,6 +246,51 @@ pattern = '预训练|后训练|强化学习|模型训练'
 - **分数只做分诊，不代表结论。** 它把几百条砍到几十条；
   「这个岗要 50 人管理经验而你带 5 人」这种判断要读 JD，是 `/job-match` 的事。
   第 1 名可能有硬门槛冲突，第 8 名可能才是最该投的。
+
+### 两种打分的分工
+
+`job score` 之外还有一层 `job llm-score`：让模型读 JD 与你的简历，打**两个维度**的分，
+各 1-10 分并附一条或多条依据。
+
+| | `job score` | `job llm-score` |
+| --- | --- | --- |
+| 依据 | `[score]` 关键词命中 | 读 JD 与简历的语义判断 |
+| 成本 | 本地几毫秒 | 每条一次模型调用，按条计费 |
+| 刷新 | 整表重写全库排名 | 按条 upsert，已打的留着 |
+| 默认范围 | 全库 | **必须显式指定** |
+
+两个维度回答的是两个不相干的问题，所以**并列落库、不合成总分**：
+
+- **岗位吸引力（appeal）**——从求职者一侧：薪资水位、公司体量与阶段、
+  JD 写得专不专业、业务靠不靠谱、是否落在你写的方向与硬约束里。
+- **胜任匹配度（fit）**——从招聘方一侧：硬门槛过不过、核心经历贴不贴、
+  技术栈与职级差多少，也就是你拿到这份工作的概率。
+
+合成一个「推荐度」会把两者搅在一起：「够不着的好岗」和「够得着的烂岗」算出来一样高，
+而这两种情况该做的事完全不同（前者去准备说服，后者去想想要不要投）。
+
+```bash
+uv run job llm-score --top 30 --why      # 按关键词分数取前 30 条，展开依据
+uv run job llm-score 1234 5678           # 指定 jobId
+uv run job llm-score --all --yes         # 全库（默认要确认）
+uv run job llm-score --top 30 --force -j 8   # 重打 + 并发 8
+uv run job llm-score --top 30 --provider deepseek   # 临时换个便宜模型
+```
+
+三个要知道的口径：
+
+- **不给范围就报错退出。** 一条命令顺手花掉几千次调用的钱，不该是「忘了带参数」
+  就能触发的。
+- **同模型 + 同提示词已经打过的默认跳过**，`--force` 才重打。换了模型或改了提示词
+  就不跳过——旧分数和新的不可比。`job stats` 会报出库里混着几条旧口径的分数。
+- **判断方法论可以改。** 两段提示词的默认值在 `src/` 里（只写方法论），
+  想改就在 profile 目录下建 `score_appeal.md` / `score_fit.md`，或者在
+  `job web` 的「配置」页里改。「你想去什么方向」不用写进提示词——
+  简历与 `preferences.md` 会一起发给模型。
+
+配 API key：`config/config.toml` 的 `[agent.providers.*]` 填 `api_key`；
+`[llm_score].provider` 指其中一个（留空 = 跟随 `[agent].provider`），
+`[llm_score].concurrency` 控并发（默认 4）。
 
 `-o` 产出的 Markdown 里，每条岗位有三处 `<待 /job-match 填写>`：
 **硬门槛核对**、**投不投**、**投递口径**。代码刻意不填——填了模板话术，
@@ -344,11 +401,13 @@ uv run job resume import 简历.docx -o /tmp/resume.txt
 `job web` 启动后（默认 <http://127.0.0.1:18000>）提供四个页面：
 
 - **职位**：不分页一次全给、点表头排序，按关键词 / 薪资 / **岗位来源**（HR 岗位 or
-  猎头岗位）/ 是否有 JD / 是否投递筛选，展开看 JD 全文，一键投递（有二次确认），
-  以及**重新打分**按钮
-- **采集任务**：在页面上发起搜索 / 抓详情，实时看进度与日志，可取消
-- **数据概览**：库存计数、薪资水位、分数新鲜度、各关键词的职位数
-- **配置**：直接改**搜索关键词**与 **`[score]` 打分逻辑**，其余只读
+  猎头岗位）/ 是否有 JD / 是否投递 / **是否 LLM 打过分**筛选，展开看 JD 全文与
+  两维裁决的依据，一键投递（有二次确认），**重新打分**按钮，以及**勾选一批职位
+  批量送 LLM 打分**
+- **采集任务**：在页面上发起搜索 / 抓详情、看 LLM 打分进度，实时看日志，可取消
+- **数据概览**：库存计数、薪资水位、分数新鲜度、LLM 打分覆盖率、各关键词的职位数
+- **配置**：直接改**搜索关键词**、**`[score]` 打分逻辑**与 **LLM 打分提示词**，
+  其余只读
 
 API 文档在 `/docs`。后台任务**只有一个 worker**：猎聘限流按 token 记账，
 并行只会更快被封；SQLite 的写也不适合并发。取消是协作式的——
@@ -362,10 +421,18 @@ API 文档在 `/docs`。后台任务**只有一个 worker**：猎聘限流按 to
 `core.matching.refresh`，读当前 `[score]` 把全库重算一遍、整表重写 `job_scores`。
 它不进后台任务队列——打分不发请求、不受限流约束，几千条一两秒就完了。
 
-Web 端能改的配置只有两处：`[search].keywords` 与 `[score]`——求职过程里真正
-需要反复调的就是「搜什么词」和「什么算对口」，为了改一个权重去翻 TOML
-是把最高频的动作放到了最远的地方。猎聘 token、模型接入点、限速属于「怎么连」，
-一次配好就不动，也不该有回显密钥的接口，所以仍然只读。
+**LLM 打分**在页面上是勾选式的：职位表每行前面一个复选框，选好之后点
+「给选中的 LLM 打分」（或「打分当前 N 条」打完整个筛选结果），二次确认后排进
+后台任务队列，进度、日志与取消都在「采集任务」页。它**进队列**而重新打分不进，
+判据是「会不会发请求」：打分是本地计算、几千条一两秒；LLM 打分按条调 API、
+按条计费、跑几分钟，正是队列存在的理由。换筛选条件会清空勾选——
+勾了 30 条、一改关键词只剩 3 条在屏幕上，然后点打分，花的是那 30 条的钱。
+
+Web 端能改的配置只有三处：`[search].keywords`、`[score]`，与 **LLM 打分的两段
+提示词**——它们都是「判断口径」，是求职过程里真正要反复调的：搜什么词、
+什么算对口、怎么判断一个岗好不好和自己够不够格。为了改一个权重或一句话去翻文件，
+是把最高频的动作放到了最远的地方。猎聘 token、模型接入点、并发、限速属于
+「怎么连」，一次配好就不动，也不该有回显密钥的接口，所以仍然只读。
 
 **改的仍然是文件**：保存 = 写回 `profiles/<名>/profile.toml` 再重新加载配置，
 所以 CLI、Web、`job agent` 读到的永远是同一份，不存在「网页上改了但下次

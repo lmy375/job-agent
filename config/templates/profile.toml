@@ -21,6 +21,14 @@ account = "default"
 resume = "resume.md"
 preferences = "preferences.md"
 
+# LLM 打分（`job llm-score`）两个维度的提示词。**这两个文件默认不存在**，
+# 那表示用 src 里的内置方法论——想改就在 profile 目录下建同名文件，
+# 或者直接在 Web 的「配置」页里改（保存时会替你建）。整段替换，不是追加。
+#   score_appeal.md  维度一：从求职者角度，这份工作本身值多少分
+#   score_fit.md     维度二：从招聘方角度，你拿到它的概率有多大
+# score_appeal_prompt = "score_appeal.md"
+# score_fit_prompt = "score_fit.md"
+
 # ---------------------------------------------------------------- 搜索
 [search]
 address = "北京"          # 工作地点，服务端模糊匹配

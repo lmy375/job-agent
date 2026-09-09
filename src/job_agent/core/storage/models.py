@@ -125,3 +125,37 @@ class JobScoreRecord(Base):
     #: 算这批分数时 [score] 配置的指纹，见类文档
     rulesFingerprint: Mapped[str] = mapped_column(String, default="", index=True)
     scoredAt: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+
+class LlmScoreRecord(Base):
+    """``job llm-score`` 落库的两维语义打分。
+
+    和 ``job_scores`` 分两张表，因为**刷新语义正相反**：那张是整表重写的全库排名
+    （改一条权重会牵动所有人的名次），这张是按条产出、按条累积的——LLM 打分按条
+    计费，不可能因为多采了 10 条职位就把全库几千条重打一遍。混在一张表里，
+    两种刷新会互相把对方的结果抹掉。
+
+    也**不存全库排名**：名次是「全量重算一遍」才有的概念，而这张表天然是残缺的
+    （只打过一部分）。排序交给读的那一方（Web 点表头、CLI 按分排）。
+
+    ``promptFingerprint`` + ``provider`` + ``model`` 三者一起判过期：换了模型或改了
+    提示词，同一条 JD 的分数就不再可比——回看时得能分清「分数变了」是因为
+    JD 变了，还是因为换了判断的人。
+    """
+
+    __tablename__ = "llm_scores"
+
+    jobId: Mapped[int] = mapped_column(Integer, primary_key=True)
+    #: 岗位吸引力（1-10）：从求职者角度，这份工作本身值多少分
+    appealScore: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    #: 胜任匹配度（1-10）：从招聘方角度，这个人拿到它的概率有多大
+    fitScore: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    #: 两个维度各自的打分依据，一条或多条。没有依据的分数不可复核
+    appealReasons: Mapped[list[str]] = mapped_column(JSON, default=list)
+    fitReasons: Mapped[list[str]] = mapped_column(JSON, default=list)
+    #: 判这条的模型（[agent.providers.*] 的表名 + 模型名）
+    provider: Mapped[str] = mapped_column(String, default="")
+    model: Mapped[str] = mapped_column(String, default="")
+    #: 两段提示词最终文本的指纹，见类文档
+    promptFingerprint: Mapped[str] = mapped_column(String, default="", index=True)
+    scoredAt: Mapped[datetime] = mapped_column(DateTime, default=_now)

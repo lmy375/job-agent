@@ -24,6 +24,9 @@ logger = get_logger(__name__)
 #: JD 正文短于这个长度视为没抓到有效内容
 MIN_DESCRIPTION_LEN = 30
 
+#: 单条 JD 送模型的正文上限。JD 正常几千字符，超长的多半是页面噪声，截断以控成本
+JD_CHAR_LIMIT = 6000
+
 _WS_RE = re.compile(r"\s+")
 
 
@@ -132,3 +135,21 @@ def dedupe_rows(rows: list[JobFacts]) -> list[JobFacts]:
             row.dupes = current.dupes
             best[key] = row
     return list(best.values())
+
+
+def jd_text(row: JobFacts, limit: int = JD_CHAR_LIMIT) -> str:
+    """把三段正文合成一份送模型的 JD 文本。
+
+    ``description`` 通常已经包含职责与要求，三段直接拼会重复一大半，
+    所以去掉被前文包含的段。超长截断只为控成本——JD 正常几千字符，
+    上万的基本是页面噪声混了进来。
+    """
+    parts = [text.strip() for text in (row.description, row.responsibilities, row.requirements)]
+    merged: list[str] = []
+    for part in parts:
+        if part and not any(part in kept for kept in merged):
+            merged.append(part)
+    text = "\n\n".join(merged)
+    if len(text) > limit:
+        text = text[:limit] + "\n……（超长截断）"
+    return text

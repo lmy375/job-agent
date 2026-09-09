@@ -1,39 +1,17 @@
-"""agent 路线里的确定性部分：读档案、分诊、渲染计划。
+"""agent 路线里的确定性部分：分诊、渲染计划。
 
-全部是纯函数 + 共享内核调用，不 import langgraph、不碰 LLM——
-没装 agent extra 也能单测。判断类逻辑（读 JD 比硬门槛）在 nodes.py 的审读节点里。
+全部是纯函数 + 共享内核调用，不 import langgraph、不碰 LLM，所以能单独单测。
+判断类逻辑（读 JD 比硬门槛）在 nodes.py 的审读节点里。
+读简历与偏好、把 JD 三段拼成送模型的正文，两条路线都要用，已下沉到
+:mod:`job_agent.core.profile` 与 :mod:`job_agent.core.dataset`。
 """
 
 from __future__ import annotations
 
 from job_agent.agent.state import JDVerdict, ShortlistJob
-from job_agent.config import Settings
 from job_agent.context import AppContext
-from job_agent.core.dataset import JobFacts
+from job_agent.core.dataset import jd_text
 from job_agent.core.matching.scorer import ScoredJob, refresh
-from job_agent.errors import ConfigError
-
-#: 单条 JD 送审的正文上限。JD 正常几千字符，超长的多半是页面噪声，截断以控成本
-JD_CHAR_LIMIT = 6000
-
-
-def load_profile(settings: Settings) -> tuple[str, str]:
-    """读简历与求职偏好原文。缺文件直接报错——没有档案的审读毫无意义。"""
-    texts: list[str] = []
-    for label, path in (
-        ("简历", settings.profile.resume),
-        ("求职偏好", settings.profile.preferences),
-    ):
-        if not path.is_file():
-            raise ConfigError(
-                f"{label}文件不存在：{path}\n  先在 Claude Code 里跑 `/job-init` 生成，"
-                "或手工按 config/templates/ 下的模板填写。"
-            )
-        content = path.read_text(encoding="utf-8").strip()
-        if not content:
-            raise ConfigError(f"{label}文件是空的：{path}")
-        texts.append(content)
-    return texts[0], texts[1]
 
 
 def build_shortlist(ctx: AppContext, top_n: int) -> list[ShortlistJob]:
@@ -57,23 +35,8 @@ def _payload(job: ScoredJob) -> ShortlistJob:
         score=job.score,
         reasons=job.reasons(),
         concerns=job.concerns(),
-        jd=_jd_text(job.row),
+        jd=jd_text(job.row),
     )
-
-
-def _jd_text(row: JobFacts) -> str:
-    parts = [
-        text.strip() for text in (row.description, row.responsibilities, row.requirements)
-    ]
-    # description 通常已包含职责与要求，三段拼接会重复；去掉被前文包含的段
-    merged: list[str] = []
-    for part in parts:
-        if part and not any(part in kept for kept in merged):
-            merged.append(part)
-    text = "\n\n".join(merged)
-    if len(text) > JD_CHAR_LIMIT:
-        text = text[:JD_CHAR_LIMIT] + "\n……（超长截断）"
-    return text
 
 
 def render_plan(

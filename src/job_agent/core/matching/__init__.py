@@ -9,24 +9,44 @@
 
 :func:`refresh` 会把分数与排名写进 ``job_scores`` 表——``job score`` 与
 ``job agent`` 都走它，所以两条路线看到的永远是同一批分数。
+
+旁边还有一层 **LLM 语义打分**（:mod:`~job_agent.core.matching.llm_scorer`）：
+两个维度、各 1-10 分、各带依据，读得懂关键词读不出的语义门槛。
+两套分数**并列**，不合成——谁重要由看的人决定。
 """
 
 from __future__ import annotations
 
+from job_agent.core.matching.llm_scorer import (
+    LlmScorer,
+    LlmScoreResult,
+    LlmScoreSummary,
+    LlmVerdict,
+    build_candidates,
+    build_scorer,
+)
 from job_agent.core.matching.scorer import (
     Hit,
     ScoredJob,
     ScoreRefresh,
     refresh,
+    score_all,
     score_row,
 )
 from job_agent.core.matching.shortlist import render_shortlist
 
 __all__ = [
     "Hit",
+    "LlmScoreResult",
+    "LlmScoreSummary",
+    "LlmScorer",
+    "LlmVerdict",
     "ScoreRefresh",
     "ScoredJob",
+    "build_candidates",
+    "build_scorer",
     "refresh",
     "render_shortlist",
+    "score_all",
     "score_row",
 ]

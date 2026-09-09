@@ -17,8 +17,7 @@ from typing import Any
 from langgraph.graph import END
 from langgraph.types import Send, interrupt
 
-from job_agent.agent.llm import bind_review_schema
-from job_agent.agent.pipeline import build_shortlist, load_profile, render_plan
+from job_agent.agent.pipeline import build_shortlist, render_plan
 from job_agent.agent.prompts import review_system_message, review_user_message
 from job_agent.agent.state import (
     AgentState,
@@ -29,6 +28,8 @@ from job_agent.agent.state import (
     ReviewInput,
 )
 from job_agent.context import AppContext
+from job_agent.core.llm import bind_schema
+from job_agent.core.profile import load_profile
 from job_agent.core.services.apply import ApplyService
 from job_agent.core.services.detail import DetailService
 from job_agent.core.services.progress import ProgressEvent
@@ -57,7 +58,7 @@ class GraphNodes:
         # 结构化输出：裁决必须符合 JDVerdict 的 schema，字段口径跨次运行一致。
         # 用哪种实现方式由 [agent.providers.*].structured_output 决定——各家支持度不同
         method = self.settings.agent.active.structured_output
-        self._review_llm = bind_review_schema(llm, JDVerdict, method)
+        self._review_llm = bind_schema(llm, JDVerdict, method)
         self._review_system = review_system_message(method)
 
     # ------------------------------------------------------------ 确定性节点

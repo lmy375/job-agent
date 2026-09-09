@@ -9,6 +9,7 @@ from job_agent.cli.commands import (
     apply_cmd,
     config_cmd,
     db_cmd,
+    llm_score_cmd,
     profile_cmd,
     resume_cmd,
     score_cmd,
@@ -27,6 +28,13 @@ def register(app: typer.Typer) -> None:
         "score",
         help=h("按 profile.toml 的 [score] 信号表打分排序（分诊）；-o 写出候选清单骨架。"),
     )(score_cmd.score)
+    app.command(
+        "llm-score",
+        help=h(
+            "让模型给职位打两个维度的分（岗位吸引力 / 胜任匹配度，各 1-10 分并附依据）。"
+            "按条计费，必须用 jobId / --top / --all 说清楚打哪些。"
+        ),
+    )(llm_score_cmd.llm_score)
     app.command("apply", help="投递职位（可传多个 jobId）。")(apply_cmd.apply)
     app.command(
         "agent",

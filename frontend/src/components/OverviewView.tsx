@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { formatTime } from "../format";
-import type { OverviewResponse, ScoreStatus } from "../types";
+import type { LlmScoreStatus, OverviewResponse, ScoreStatus } from "../types";
 import RescoreButton from "./RescoreButton";
 
 /**
@@ -20,6 +20,24 @@ function scoreNote(score: ScoreStatus): { text: string; warn: boolean } {
   if (score.missing > 0)
     return { text: `${score.missing} 条有 JD 却没打分——点上面的「重新打分」`, warn: true };
   return { text: `最近一次 ${formatTime(score.scoredAt)}`, warn: false };
+}
+
+/**
+ * LLM 打分的覆盖率提示。
+ *
+ * 「还有多少没打」刻意**不**说成待办：按条计费，大部分没打过是常态，
+ * 天天喊「还差 3000 条」只会让人学会忽略这一格。真该提醒的是口径不一致——
+ * 库里混着别的模型或旧提示词判出来的分数，那些和现在这批没法比。
+ */
+function llmNote(llm: LlmScoreStatus): { text: string; warn: boolean } {
+  if (llm.scored === 0)
+    return { text: "还没打过——去「职位」页勾几条试试", warn: false };
+  if (llm.stale)
+    return {
+      text: `其中 ${llm.scored - llm.current} 条是别的模型或旧提示词判的，不可比`,
+      warn: true,
+    };
+  return { text: `最近一次 ${formatTime(llm.scoredAt)}`, warn: false };
 }
 
 export default function OverviewView() {
@@ -58,6 +76,12 @@ export default function OverviewView() {
             label="已打分"
             note={scoreNote(stats.score).text}
             warn={scoreNote(stats.score).warn}
+          />
+          <Stat
+            value={`${stats.llmScore.scored}/${stats.llmScore.scorable}`}
+            label="LLM 打分覆盖"
+            note={llmNote(stats.llmScore).text}
+            warn={llmNote(stats.llmScore).warn}
           />
           <Stat
             value={Object.values(stats.applications).reduce((a, b) => a + b, 0)}

@@ -333,3 +333,131 @@ def test_unknown_task_kind_is_422(client):
 
 def test_report_endpoint_is_gone(client):
     assert client.get("/report").status_code == 404
+
+
+# ---------------------------------------------------------------- LLM 打分
+
+
+def test_llm_score_task_requires_api_key(client, seeded):
+    """提交前就挡掉「跑不动」的情况：排进队列再失败，人得等一轮轮询才知道。"""
+    response = client.post(
+        "/api/tasks", json={"kind": "llm_score", "params": {"job_ids": [1]}}
+    )
+    assert response.status_code == 400
+    assert "api_key" in response.json()["detail"]
+
+
+def test_llm_score_task_requires_job_ids(client, seeded, monkeypatch):
+    """按条计费，「不传就全打」这种默认在任何入口都不该存在。"""
+    monkeypatch.setattr(
+        seeded.settings.llm_score_active, "api_key", _secret("sk-test")
+    )
+    response = client.post("/api/tasks", json={"kind": "llm_score", "params": {}})
+    assert response.status_code == 400
+    assert "job_ids" in response.json()["detail"]
+
+
+def test_llm_score_task_runs_and_persists(client, seeded, monkeypatch):
+    """整条链路：提交任务 → 后台跑完 → 分数进库 → 列表带出来。"""
+    _patch_scorer(monkeypatch)
+    monkeypatch.setattr(
+        seeded.settings.llm_score_active, "api_key", _secret("sk-test")
+    )
+    created = client.post(
+        "/api/tasks", json={"kind": "llm_score", "params": {"job_ids": [1, 2]}}
+    )
+    assert created.status_code == 202
+    task_id = created.json()["task"]["id"]
+
+    detail = _await_task(client, task_id)
+    assert detail["status"] == "succeeded"
+    result = detail["result"]
+    # 2 号没抓到 JD，判不了，算跳过而不是失败
+    assert (result["requested"], result["scored"], result["skipped"]) == (2, 1, 1)
+
+    job = next(j for j in client.get("/api/jobs").json()["jobs"] if j["jobId"] == 1)
+    assert (job["llmAppeal"], job["llmFit"]) == (8, 6)
+    assert job["llmAppealReasons"] == ["平台够大"]
+
+    only = client.get("/api/jobs", params={"llm_scored": True}).json()
+    assert [j["jobId"] for j in only["jobs"]] == [1]
+
+
+def test_overview_reports_llm_coverage(client, seeded):
+    body = client.get("/api/stats").json()["llmScore"]
+    assert body == {
+        "scorable": 1,
+        "scored": 0,
+        "current": 0,
+        "stale": False,
+        "scoredAt": None,
+    }
+
+
+def test_prompts_default_and_override(client, context, profile_dir):
+    """内置默认也返回全文——要改就得先看见改什么。"""
+    body = client.get("/api/config/prompts").json()
+    assert body["appeal"]["isDefault"] is True
+    assert "岗位吸引力" in body["appeal"]["content"] or body["appeal"]["content"]
+    assert body["modelLabel"] == "anthropic / claude-opus-5"
+    before = body["fingerprint"]
+
+    updated = client.put(
+        "/api/config/prompts",
+        json={"appeal": body["appeal"]["content"], "fit": "只看学历。"},
+    ).json()
+    # 和内置默认逐字相同的那半不落盘：那不是「自定义」
+    assert updated["appeal"]["isDefault"] is True
+    assert not (profile_dir / "score_appeal.md").exists()
+    assert updated["fit"]["isDefault"] is False
+    assert (profile_dir / "score_fit.md").read_text(encoding="utf-8") == "只看学历。\n"
+    assert updated["fingerprint"] != before
+
+
+def test_prompts_empty_restores_default(client, profile_dir):
+    """空串 = 删掉覆盖文件，不是「存一份空提示词」。"""
+    client.put("/api/config/prompts", json={"appeal": "只看薪资。", "fit": ""})
+    assert (profile_dir / "score_appeal.md").exists()
+
+    body = client.put("/api/config/prompts", json={"appeal": "", "fit": ""}).json()
+    assert body["appeal"]["isDefault"] is True
+    assert not (profile_dir / "score_appeal.md").exists()
+
+
+def _secret(value: str):
+    from pydantic import SecretStr
+
+    return SecretStr(value)
+
+
+def _patch_scorer(monkeypatch):
+    """替掉模型客户端。任务照常进队列、照常报进度，只是不发请求。"""
+    from job_agent.core.matching import LlmVerdict, llm_scorer
+
+    class FakeLLM:
+        def invoke(self, messages):
+            return LlmVerdict(
+                appeal_score=8,
+                appeal_reasons=["平台够大"],
+                fit_score=6,
+                fit_reasons=["经验差两年"],
+            )
+
+    real = llm_scorer.build_scorer
+
+    def patched(settings, db, repo, on_progress=None, llm=None):
+        return real(settings, db, repo, on_progress, llm or FakeLLM())
+
+    monkeypatch.setattr("job_agent.web.routers.tasks.build_scorer", patched)
+
+
+def _await_task(client, task_id: str, tries: int = 100) -> dict:
+    """等后台 worker 跑完。任务在线程池里，提交立刻返回，得轮询。"""
+    import time
+
+    for _ in range(tries):
+        body = client.get(f"/api/tasks/{task_id}").json()["task"]
+        if body["status"] in ("succeeded", "failed", "cancelled"):
+            return body
+        time.sleep(0.02)
+    raise AssertionError(f"任务 {task_id} 没在预期时间内结束")

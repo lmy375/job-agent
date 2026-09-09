@@ -23,6 +23,7 @@ from job_agent.core.storage.models import (
     JobDetailRecord,
     JobRecord,
     JobScoreRecord,
+    LlmScoreRecord,
 )
 from job_agent.core.storage.rows import (
     ApplicationRow,
@@ -30,6 +31,8 @@ from job_agent.core.storage.rows import (
     JobDetailRow,
     JobRow,
     KeywordCount,
+    LlmScoreEntry,
+    LlmScoreStatus,
     PendingDetail,
     SalarySummary,
     ScoreEntry,
@@ -62,8 +65,23 @@ def _attach_score(row: JobRow, record: JobScoreRecord | None) -> JobRow:
     return row
 
 
-def _job_row(job: JobRecord, score: JobScoreRecord | None) -> JobRow:
-    return _attach_score(JobRow.model_validate(job), score)
+def _attach_llm_score(row: JobRow, record: LlmScoreRecord | None) -> JobRow:
+    """把 ``llm_scores`` 的一行挂到职位行上。没送过模型就保持默认（llmAppeal=None）。"""
+    if record is not None:
+        row.llmAppeal = record.appealScore
+        row.llmFit = record.fitScore
+        row.llmAppealReasons = list(record.appealReasons)
+        row.llmFitReasons = list(record.fitReasons)
+        row.llmProvider = record.provider
+        row.llmModel = record.model
+        row.llmScoredAt = record.scoredAt
+    return row
+
+
+def _job_row(
+    job: JobRecord, score: JobScoreRecord | None, llm: LlmScoreRecord | None
+) -> JobRow:
+    return _attach_llm_score(_attach_score(JobRow.model_validate(job), score), llm)
 
 
 class JobQuery(BaseModel):
@@ -86,6 +104,8 @@ class JobQuery(BaseModel):
     min_salary: float | None = None  # 年薪下限（万元），比较的是 salaryHighWan
     #: 只看打过分的（用来筛掉还没抓 JD、因此没有分数的那些）
     scored: bool | None = None
+    #: 只看送过 / 没送过 LLM 打分的。批量挑「还没打过的那批」时最常用
+    llm_scored: bool | None = None
     order: OrderBy = "score"
     limit: int = MAX_ROWS
 
@@ -144,31 +164,32 @@ class JobRepository:
     # ---------------------------------------------------------------- 查询
 
     def find(self, query: JobQuery | None = None) -> JobPage:
-        """职位列表，LEFT JOIN 上 ``job_scores`` 的分数与排名。
+        """职位列表，LEFT JOIN 上 ``job_scores`` 与 ``llm_scores`` 两份分数。
 
         外连接而不是内连接：没抓 JD 的职位打不了分，但它们仍然该出现在列表里
-        （前端要能筛「未抓到 JD」）。没分数的行 ``score`` / ``scoreRank`` 是 None。
+        （前端要能筛「未抓到 JD」）。没分数的行 ``score`` / ``llmAppeal`` 是 None。
+        两份分数**并列**，谁重要由看的人决定——代码不合成总分。
         """
         q = query or JobQuery()
         base = self._apply_filters(
-            select(JobRecord, JobScoreRecord).outerjoin(
-                JobScoreRecord, JobRecord.jobId == JobScoreRecord.jobId
-            ),
-            q,
+            self._with_scores(select(JobRecord, JobScoreRecord, LlmScoreRecord)), q
         )
 
         with self.db.session() as s:
             total = s.scalar(
                 self._apply_filters(
-                    select(func.count())
-                    .select_from(JobRecord)
-                    .outerjoin(JobScoreRecord, JobRecord.jobId == JobScoreRecord.jobId),
-                    q,
+                    self._with_scores(select(func.count()).select_from(JobRecord)), q
                 )
             ) or 0
             stmt = base.order_by(*self._order_clause(q.order)).limit(q.limit)
-            items = [_job_row(job, score) for job, score in s.execute(stmt)]
+            items = [_job_row(job, score, llm) for job, score, llm in s.execute(stmt)]
         return JobPage(total=total, items=items)
+
+    @staticmethod
+    def _with_scores(stmt: Select[Any]) -> Select[Any]:
+        return stmt.outerjoin(
+            JobScoreRecord, JobRecord.jobId == JobScoreRecord.jobId
+        ).outerjoin(LlmScoreRecord, JobRecord.jobId == LlmScoreRecord.jobId)
 
     def get(self, job_id: int) -> JobRow | None:
         with self.db.session() as s:
@@ -191,6 +212,7 @@ class JobRepository:
             # 让 ORM 去做 relationship 只会为一个接口引入懒加载的坑
             bundle = JobBundle.model_validate(job)
             _attach_score(bundle, s.get(JobScoreRecord, job_id))
+            _attach_llm_score(bundle, s.get(LlmScoreRecord, job_id))
             bundle.detail = JobDetailRow.model_validate(detail) if detail else None
             bundle.applications = [ApplicationRow.model_validate(a) for a in applications]
             return bundle
@@ -290,6 +312,12 @@ class JobRepository:
         if q.scored is not None:
             stmt = stmt.where(
                 JobScoreRecord.jobId.is_not(None) if q.scored else JobScoreRecord.jobId.is_(None)
+            )
+        if q.llm_scored is not None:
+            stmt = stmt.where(
+                LlmScoreRecord.jobId.is_not(None)
+                if q.llm_scored
+                else LlmScoreRecord.jobId.is_(None)
             )
         return stmt
 
@@ -442,5 +470,105 @@ class ScoreRepository:
             scored=scored,
             missing=max(total_scorable - scored, 0),
             stale=prints != {fingerprint},
+            scoredAt=stamped,
+        )
+
+
+class LlmScoreRepository:
+    """``llm_scores`` 表：按条 upsert + 覆盖率查询。
+
+    和 :class:`ScoreRepository` 刻意相反：那张表只有整表重写，这张只有按条更新。
+    LLM 打分按条计费，不可能因为多采了 10 条职位就把全库重打一遍，
+    所以「已有的留着、这次打的覆盖上去」才是对的语义。
+
+    ``provider`` / ``model`` / ``promptFingerprint`` 三样由仓储统一盖在
+    这一批的每一行上——让调用方逐行填，迟早出现半张表盖 A、半张表盖 B。
+    """
+
+    def __init__(self, db: Database) -> None:
+        self.db = db
+
+    def upsert_many(
+        self,
+        entries: Sequence[LlmScoreEntry],
+        provider: str,
+        model: str,
+        fingerprint: str,
+    ) -> int:
+        """按 jobId 写入/覆盖，返回写入条数。"""
+        if not entries:
+            return 0
+        stamped = datetime.now()
+        with self.db.session() as s:
+            for entry in entries:
+                row: dict[str, Any] = {
+                    **entry.model_dump(),
+                    "provider": provider,
+                    "model": model,
+                    "promptFingerprint": fingerprint,
+                    "scoredAt": stamped,
+                }
+                stmt = sqlite_insert(LlmScoreRecord).values(**row)
+                s.execute(
+                    stmt.on_conflict_do_update(
+                        index_elements=["jobId"],
+                        set_={k: stmt.excluded[k] for k in row if k != "jobId"},
+                    )
+                )
+        logger.debug(
+            "写入 %d 条 LLM 分数（%s / %s，fingerprint=%s）",
+            len(entries),
+            provider,
+            model,
+            fingerprint,
+        )
+        return len(entries)
+
+    def current_ids(self, provider: str, model: str, fingerprint: str) -> set[int]:
+        """已经用**这套口径**（同模型、同提示词）打过的 jobId。
+
+        跳过重打就按它算：换了模型或改了提示词，旧分数与新的不可比，
+        该重打；口径没变的重打只是白花钱。
+        """
+        stmt = select(LlmScoreRecord.jobId).where(
+            LlmScoreRecord.provider == provider,
+            LlmScoreRecord.model == model,
+            LlmScoreRecord.promptFingerprint == fingerprint,
+        )
+        with self.db.session() as s:
+            return set(s.scalars(stmt))
+
+    def count(self) -> int:
+        with self.db.session() as s:
+            return s.scalar(select(func.count()).select_from(LlmScoreRecord)) or 0
+
+    def status(self, provider: str, model: str, fingerprint: str) -> LlmScoreStatus:
+        """覆盖率与新鲜度。
+
+        ``missing`` 刻意不报：LLM 打分按条计费，「大部分没打过」是常态，
+        把它当成待办只会天天在页面上喊。``stale`` 才值得提醒——
+        已打过的行里混着别的模型或别的提示词判出来的分数，那些和现在这批不可比。
+        """
+        scorable_stmt = (
+            select(func.count())
+            .select_from(JobRecord)
+            .join(JobDetailRecord, JobRecord.jobId == JobDetailRecord.jobId)
+            .where(JobDetailRecord.status == "ok")
+        )
+        current_stmt = select(func.count()).where(
+            LlmScoreRecord.provider == provider,
+            LlmScoreRecord.model == model,
+            LlmScoreRecord.promptFingerprint == fingerprint,
+        )
+        with self.db.session() as s:
+            scorable = s.scalar(scorable_stmt) or 0
+            scored = s.scalar(select(func.count()).select_from(LlmScoreRecord)) or 0
+            current = s.scalar(current_stmt) or 0
+            stamped = s.scalar(select(func.max(LlmScoreRecord.scoredAt)))
+        return LlmScoreStatus(
+            scorable=scorable,
+            scored=scored,
+            current=current,
+            stale=scored > current,
             scoredAt=stamped,
         )

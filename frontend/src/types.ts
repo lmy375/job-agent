@@ -53,6 +53,18 @@ export interface JobRow {
   scoreHits: string[];
   scorePenalties: string[];
   scoredAt: string | null;
+
+  // ---- 以下来自 llm_scores：没送过模型就整块是 null / 空数组
+  /** 岗位吸引力（1-10，从求职者角度：这份工作本身值多少分） */
+  llmAppeal: number | null;
+  /** 胜任匹配度（1-10，从招聘方角度：这个人拿到它的概率） */
+  llmFit: number | null;
+  llmAppealReasons: string[];
+  llmFitReasons: string[];
+  /** 判这条的模型。换了模型分数就不可比，所以逐行记 */
+  llmProvider: string | null;
+  llmModel: string | null;
+  llmScoredAt: string | null;
 }
 
 /** `JobDetailRow`：解析出的 JD 字段 + 落库时才有的身份与状态。 */
@@ -115,6 +127,24 @@ export interface ScoreStatus {
   scoredAt: string | null;
 }
 
+/**
+ * LLM 打分的覆盖率与口径一致性。
+ *
+ * 和 `ScoreStatus` 的关键差别：这里**没有** `missing`。关键词打分是全库刷新，
+ * 漏一条就是没跑；LLM 打分按条计费，「大部分没打过」是常态，不算待办。
+ */
+export interface LlmScoreStatus {
+  /** 库里有 JD、够格送模型的条数 */
+  scorable: number;
+  /** 已打过分的条数 */
+  scored: number;
+  /** 其中用当前提示词 + 当前模型判的有几条 */
+  current: number;
+  /** 存在别的模型或旧提示词判出来的分数——和现在这批不可比 */
+  stale: boolean;
+  scoredAt: string | null;
+}
+
 export interface JobListResponse {
   total: number;
   /** 兜底上限，不是页大小。`total > jobs.length` 就是被截断了 */
@@ -155,6 +185,7 @@ export interface OverviewResponse {
   keywords: KeywordCount[];
   pendingDetails: number;
   score: ScoreStatus;
+  llmScore: LlmScoreStatus;
 }
 
 export interface HealthResponse {
@@ -175,6 +206,9 @@ export interface ConfigPaths {
   database: string;
   resume: string;
   preferences: string;
+  /** LLM 打分提示词的覆盖文件位置。**不存在很正常**——那表示用的是内置默认 */
+  appealPrompt: string;
+  fitPrompt: string;
 }
 
 /**
@@ -200,6 +234,7 @@ export interface AppSettings {
     rate_limit_per_min: number;
   };
   score: ScoreSettings;
+  llm_score: { provider: string | null; concurrency: number };
 }
 
 /** `[score]` 里的一条信号：命中就加 `weight`，负权重即减分项。 */
@@ -244,9 +279,35 @@ export interface ConfigResponse {
   paths: ConfigPaths;
 }
 
-// ---- 采集任务
+// ---- LLM 打分提示词
 
-export type TaskKind = "search" | "detail";
+/** 一个维度的提示词。`isDefault` 为真表示 profile 里没有覆盖文件。 */
+export interface PromptView {
+  content: string;
+  isDefault: boolean;
+  /** 覆盖文件该放的位置（不存在也给出来，好知道往哪写） */
+  path: string;
+}
+
+/** `GET/PUT /api/config/prompts`。 */
+export interface PromptsResponse {
+  appeal: PromptView;
+  fit: PromptView;
+  /** 两段最终文本的指纹。它一变，库里已有的 LLM 分数就不再可比 */
+  fingerprint: string;
+  /** 这份提示词会配哪个模型跑（provider / model） */
+  modelLabel: string;
+}
+
+/** 改写提示词。**空串 = 删掉覆盖文件、回到内置默认**，不是「存一份空的」。 */
+export interface PromptsUpdate {
+  appeal: string;
+  fit: string;
+}
+
+// ---- 后台任务
+
+export type TaskKind = "search" | "detail" | "llm_score";
 
 export type TaskStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
@@ -267,6 +328,12 @@ export interface TaskParams {
   limit: number | null;
   /** 抓 JD 时连之前失败的一起重试 */
   retry_failed: boolean;
+  /** 仅 llm_score：给这些 jobId 打分（**必填**，按条计费，没有默认全打） */
+  job_ids: number[] | null;
+  /** 仅 llm_score：同模型同提示词已打过的也重打 */
+  llm_force: boolean;
+  /** 仅 llm_score：并发上限（1–16），省略取配置里的值 */
+  llm_concurrency: number | null;
 }
 
 /**
@@ -308,8 +375,21 @@ export interface SearchTaskResult {
   detail: DetailTaskResult | null;
 }
 
+/** 一次批量 LLM 打分的账单。四个计数加起来 = requested。 */
+export interface LlmScoreTaskResult {
+  requested: number;
+  scored: number;
+  skipped: number;
+  failed: number;
+  cancelled: number;
+  provider: string;
+  model: string;
+  fingerprint: string;
+  errors: string[];
+}
+
 /** 任务产出。哪种取决于 kind，前端只原样展示，不按 kind 分支解读。 */
-export type TaskResult = SearchTaskResult | DetailTaskResult;
+export type TaskResult = SearchTaskResult | DetailTaskResult | LlmScoreTaskResult;
 
 export interface TaskView {
   id: string;

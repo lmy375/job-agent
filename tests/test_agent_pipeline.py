@@ -1,4 +1,4 @@
-"""agent 路线的确定性部分（pipeline.py / llm.py 的纯适配逻辑）。
+"""agent 路线的确定性部分（pipeline.py + 它用到的共享内核适配逻辑）。
 
 刻意不测 LLM 节点与组图——那需要 agent extra 和网络。
 这里只验证：档案缺失报错、分诊载荷、计划渲染、多 provider 配置的解析、
@@ -13,17 +13,14 @@ from typing import Any
 import pytest
 
 from conftest import PROFILE, make_detail, make_job
-from job_agent.agent.llm import bind_review_schema, require_api_key
-from job_agent.agent.pipeline import (
-    JD_CHAR_LIMIT,
-    build_shortlist,
-    load_profile,
-    render_plan,
-)
+from job_agent.agent.pipeline import build_shortlist, render_plan
 from job_agent.agent.prompts import REVIEW_SYSTEM, review_system_message
 from job_agent.agent.state import JDVerdict, ShortlistJob
 from job_agent.config import Settings, load_settings
 from job_agent.context import AppContext
+from job_agent.core.dataset import JD_CHAR_LIMIT
+from job_agent.core.llm import bind_schema, require_api_key
+from job_agent.core.profile import load_profile
 from job_agent.errors import ConfigError
 
 
@@ -122,6 +119,13 @@ def _load(project_root: Path, name: str, body: str) -> Settings:
     return load_settings(PROFILE, path)
 
 
+def _key(settings: Settings) -> str:
+    """审读节点取 key 的那一步：接入点从 [agent] 选，报错要指到具体那张表。"""
+    return require_api_key(
+        settings.agent.active, settings.agent.provider, "审读"
+    ).get_secret_value()
+
+
 #: 三家并存的接入点：Claude 走原生协议，ChatGPT 与 DeepSeek 共用 OpenAI 协议
 _PROVIDERS_TOML = """\
 [agent]
@@ -153,13 +157,13 @@ def test_require_api_key_from_toml(project_root: Path) -> None:
         '[agent.providers.anthropic]\napi = "anthropic"\n'
         'model = "claude-opus-5"\napi_key = "sk-ant-test"\n',
     )
-    assert require_api_key(settings).get_secret_value() == "sk-ant-test"
+    assert _key(settings) == "sk-ant-test"
 
 
 def test_require_api_key_missing(settings: Settings) -> None:
     """报错要指到具体是哪张表缺 key——三家并存时「缺 key」本身不够定位。"""
     with pytest.raises(ConfigError, match=r"\[agent\.providers\.anthropic\]"):
-        require_api_key(settings)
+        _key(settings)
 
 
 def test_active_provider_selected_by_name(project_root: Path) -> None:
@@ -169,7 +173,7 @@ def test_active_provider_selected_by_name(project_root: Path) -> None:
     assert active.api == "openai"  # DeepSeek 兼容 OpenAI 协议，共用一个客户端
     assert active.model == "deepseek-chat"
     assert active.base_url == "https://api.deepseek.com/v1"
-    assert require_api_key(settings).get_secret_value() == "sk-deepseek-test"
+    assert _key(settings) == "sk-deepseek-test"
     # 没选中的接入点照样留在配置里，不用来回粘贴密钥
     assert settings.agent.providers["anthropic"].api == "anthropic"
     assert settings.agent.model_label == "deepseek / deepseek-chat"
@@ -192,7 +196,7 @@ def test_provider_key_overridable_by_env(
     """密钥不想落盘时用环境变量覆盖——报错信息里就是这么说的，得真的成立。"""
     monkeypatch.setenv("JOB_AGENT_AGENT__PROVIDERS__DEEPSEEK__API_KEY", "sk-from-env")
     settings = _load(project_root, "providers-env.toml", _PROVIDERS_TOML)
-    assert require_api_key(settings).get_secret_value() == "sk-from-env"
+    assert _key(settings) == "sk-from-env"
     # 覆盖单个字段不会把同表其它接入点冲掉
     assert sorted(settings.agent.providers) == ["anthropic", "deepseek", "openai"]
 
@@ -229,14 +233,14 @@ class _FakeLLM:
 def test_auto_structured_output_leaves_method_to_langchain() -> None:
     """auto 不传 method：官方端点各有各的默认实现，交给 langchain 选。"""
     llm = _FakeLLM()
-    assert bind_review_schema(llm, JDVerdict, "auto") == "bound"
+    assert bind_schema(llm, JDVerdict, "auto") == "bound"
     assert llm.calls == [{"schema": JDVerdict}]
 
 
 def test_explicit_structured_output_passes_method_through() -> None:
     """兼容端点常常只吃 function_calling / json_mode，得原样传下去。"""
     llm = _FakeLLM()
-    bind_review_schema(llm, JDVerdict, "function_calling")
+    bind_schema(llm, JDVerdict, "function_calling")
     assert llm.calls == [{"schema": JDVerdict, "method": "function_calling"}]
 
 

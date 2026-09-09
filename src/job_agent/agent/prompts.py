@@ -7,9 +7,8 @@
 
 from __future__ import annotations
 
-import json
-
 from job_agent.agent.state import JDVerdict, ShortlistJob
+from job_agent.core.llm import schema_instruction
 
 REVIEW_SYSTEM = """\
 你是候选人的求职参谋，任务是审读一条职位 JD，判断值不值得投。
@@ -34,14 +33,8 @@ def review_system_message(structured_output: str) -> str:
     模型（json_schema / function_calling 两种方式才会），所以这里得自己附上。
     走兼容端点（DeepSeek 之类）时常常只能用 json_mode，这段就是为它们准备的。
     """
-    if structured_output != "json_mode":
-        return REVIEW_SYSTEM
-    schema = json.dumps(JDVerdict.model_json_schema(), ensure_ascii=False, indent=2)
-    return (
-        f"{REVIEW_SYSTEM}\n\n"
-        "输出要求：只输出一个 JSON 对象，符合下面的 JSON Schema，"
-        f"不要包代码块、不要写任何解释文字。\n{schema}"
-    )
+    note = schema_instruction(JDVerdict, structured_output)
+    return f"{REVIEW_SYSTEM}\n\n{note}" if note else REVIEW_SYSTEM
 
 
 def review_user_message(resume: str, preferences: str, job: ShortlistJob) -> str:

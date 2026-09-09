@@ -13,7 +13,11 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   cancelled: "已取消",
 };
 
-const KIND_LABEL: Record<TaskKind, string> = { search: "搜索职位", detail: "抓取详情" };
+const KIND_LABEL: Record<TaskKind, string> = {
+  search: "搜索职位",
+  detail: "抓取详情",
+  llm_score: "LLM 打分",
+};
 
 //: 到了这几个状态就没什么可取消的了
 const FINAL_STATUSES: TaskStatus[] = ["succeeded", "failed", "cancelled"];

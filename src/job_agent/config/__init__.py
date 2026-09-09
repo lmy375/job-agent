@@ -33,6 +33,7 @@ from job_agent.config.models import (
     LangSmithConfig,
     LiepinAccount,
     LiepinConfig,
+    LlmScoreConfig,
     LoggingConfig,
     ModelProvider,
     ProfileConfig,
@@ -47,7 +48,7 @@ from job_agent.config.models import (
     StorageConfig,
     WebConfig,
 )
-from job_agent.config.writer import write_keywords, write_score
+from job_agent.config.writer import write_keywords, write_prompt, write_score
 
 __all__ = [
     "ENV_CONFIG",
@@ -61,6 +62,7 @@ __all__ = [
     "LangSmithConfig",
     "LiepinAccount",
     "LiepinConfig",
+    "LlmScoreConfig",
     "LoggingConfig",
     "ModelProvider",
     "ProfileConfig",
@@ -84,5 +86,6 @@ __all__ = [
     "resolve_profile",
     "templates_dir",
     "write_keywords",
+    "write_prompt",
     "write_score",
 ]

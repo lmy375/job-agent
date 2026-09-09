@@ -19,6 +19,7 @@ from job_agent.config import (
     ScoreConfig,
     load_settings,
     write_keywords,
+    write_prompt,
     write_score,
 )
 from job_agent.config.models import RequireRule, Signal
@@ -209,3 +210,31 @@ def test_rewriting_a_middle_section_does_not_eat_the_next_one(tmp_path):
     write_keywords(path, ["新词"])
     assert parse(path).search.keywords == ["新词"]
     assert [s.name for s in parse(path).score.signals] == ["新信号"]
+
+
+# ---------------------------------------------------------------- 提示词 md
+
+
+def test_write_prompt_creates_and_removes(tmp_path):
+    """空内容 = 删文件、回到内置默认，不是「存一份空提示词」。
+
+    存一份空的会让模型收到一段没有方法论的 system——分数直接变成瞎猜，
+    比没有覆盖更糟，而且从界面上看不出来。
+    """
+    path = tmp_path / "nested" / "score_appeal.md"
+
+    assert write_prompt(path, "  只看薪资高不高。\n") == path
+    assert path.read_text(encoding="utf-8") == "只看薪资高不高。\n"
+
+    assert write_prompt(path, "   \n\n") is None
+    assert not path.exists()
+    # 已经不存在了再删一次也不该炸（页面上连点两次保存）
+    assert write_prompt(path, "") is None
+
+
+def test_write_prompt_is_a_full_replace(tmp_path):
+    """整份替换，不是追加——提示词没有「段」可言，也不该有历史残留。"""
+    path = tmp_path / "score_fit.md"
+    write_prompt(path, "第一版")
+    write_prompt(path, "第二版")
+    assert path.read_text(encoding="utf-8") == "第二版\n"

@@ -67,7 +67,8 @@ export default function App() {
 
       {error && <div className="alert error">{error}</div>}
 
-      {tab === "jobs" && <JobsView />}
+      {/* 提交 LLM 打分后自动切到任务页：任务在后台跑，进度和日志都在那边 */}
+      {tab === "jobs" && <JobsView onTaskCreated={() => setTab("tasks")} />}
       {tab === "tasks" && <TasksView />}
       {tab === "overview" && <OverviewView />}
       {tab === "config" && <ConfigView />}

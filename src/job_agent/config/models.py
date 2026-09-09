@@ -95,6 +95,11 @@ class ProfileConfig(_Model):
     account: str = "default"
     resume: Path = Path("resume.md")
     preferences: Path = Path("preferences.md")
+    #: LLM 打分两个维度的提示词覆盖文件。**文件不存在就用 src 里的内置默认**，
+    #: 所以 config/templates/ 刻意不铺这两个文件——铺了每个新 profile 一出生
+    #: 就处在「覆盖态」，以后改进内置方法论一份也传不下去。
+    score_appeal_prompt: Path = Path("score_appeal.md")
+    score_fit_prompt: Path = Path("score_fit.md")
 
 
 class SearchConfig(_Model):
@@ -413,6 +418,33 @@ class AgentConfig(_Model):
         return f"{self.provider} / {self.active.model}"
 
 
+class LlmScoreConfig(_Model):
+    """LLM 打分（``job llm-score`` / Web 上的批量打分）的运行参数。
+
+    单独一段而不是塞进 ``[agent]``：打分是**按条计费的批量活**，几百条一跑，
+    常常想用比审读便宜的模型、开更大的并发；和「一次审读三十条」是两笔账。
+
+    模型接入点仍然复用 ``[agent.providers.*]`` 那张表——加一家模型是抄一段配置，
+    没必要为了第二个用途再铺一张一模一样的表。``provider`` 留空即跟随
+    ``[agent].provider``。跨段解析在 :class:`Settings` 上（``llm_score_active``）。
+    """
+
+    #: 用 ``[agent.providers.*]`` 里的哪个接入点。留空 = 跟随 ``[agent].provider``
+    provider: str | None = None
+    #: 并发调用上限。默认 4，和审读一个数量级——再高多半先撞上各家的 RPM 限流
+    concurrency: int = Field(default=4, ge=1, le=16)
+
+    @field_validator("provider")
+    @classmethod
+    def _blank_is_unset(cls, value: str | None) -> str | None:
+        """``provider = ""`` 视同没配。
+
+        「留空 = 跟随 [agent]」这句话得真的成立：模板里写的就是空串，
+        不归一的话它会去找一张名字是空的接入点表，报一句看不懂的错。
+        """
+        return (value or "").strip() or None
+
+
 class WebConfig(_Model):
     host: str = "127.0.0.1"
     port: int = Field(default=18000, ge=1, le=65535)
@@ -483,6 +515,7 @@ class GlobalSettings(_FileSettings):
     liepin: LiepinConfig = Field(default_factory=LiepinConfig)
     detail: DetailConfig = Field(default_factory=DetailConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
+    llm_score: LlmScoreConfig = Field(default_factory=LlmScoreConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
@@ -525,6 +558,7 @@ class Settings(BaseModel):
     liepin: LiepinConfig
     detail: DetailConfig
     agent: AgentConfig
+    llm_score: LlmScoreConfig
     web: WebConfig
     logging: LoggingConfig
 
@@ -545,6 +579,37 @@ class Settings(BaseModel):
                 f"（{self.config_file}）；已定义的账号：{known}"
             )
         return self
+
+    @model_validator(mode="after")
+    def _llm_score_provider_must_exist(self) -> Settings:
+        """``[llm_score].provider`` 指的接入点得在 ``[agent.providers.*]`` 里定义过。
+
+        和账号一样是跨文件/跨段的引用，只能在组装完之后校验——
+        加载期就报错，而不是等到真去调模型时才炸。
+        """
+        name = self.llm_score.provider
+        if name is not None and name not in self.agent.providers:
+            known = "、".join(sorted(self.agent.providers)) or "（一个都没定义）"
+            raise ValueError(
+                f'[llm_score].provider = "{name}" 没有对应的 '
+                f"[agent.providers.{name}] 表；已定义的有：{known}"
+            )
+        return self
+
+    @property
+    def llm_score_provider_name(self) -> str:
+        """LLM 打分用哪个接入点。``[llm_score].provider`` 留空就跟随 ``[agent]``。"""
+        return self.llm_score.provider or self.agent.provider
+
+    @property
+    def llm_score_active(self) -> ModelProvider:
+        """LLM 打分选中的接入点。两条校验（agent 与 llm_score）保证指得到人。"""
+        return self.agent.providers[self.llm_score_provider_name]
+
+    @property
+    def llm_score_model_label(self) -> str:
+        """写进库与输出的模型标识：换了模型，分数就该算过期。"""
+        return f"{self.llm_score_provider_name} / {self.llm_score_active.model}"
 
     @property
     def account(self) -> LiepinAccount:
@@ -573,6 +638,8 @@ class Settings(BaseModel):
             database=self.storage.database,
             resume=self.profile.resume,
             preferences=self.profile.preferences,
+            appealPrompt=self.profile.score_appeal_prompt,
+            fitPrompt=self.profile.score_fit_prompt,
         )
 
 
@@ -593,3 +660,6 @@ class ConfigPaths(_Model):
     database: Path
     resume: Path
     preferences: Path
+    #: LLM 打分的提示词覆盖文件。**不存在很正常**——那表示这个维度用内置默认
+    appealPrompt: Path
+    fitPrompt: Path

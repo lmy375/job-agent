@@ -19,6 +19,8 @@ import type {
   JobListResponse,
   KeywordsResponse,
   OverviewResponse,
+  PromptsResponse,
+  PromptsUpdate,
   ScoreRefreshResponse,
   ScoreSettings,
   TaskListResponse,
@@ -103,6 +105,8 @@ export interface JobsQuery extends Record<string, QueryValue> {
   has_detail?: string | boolean;
   applied?: string | boolean;
   scored?: string | boolean;
+  /** 是否已 LLM 打分。挑「还没打过的那批」批量送模型时用 */
+  llm_scored?: string | boolean;
   order?: "score" | "recent" | "salary" | "salary_asc";
   limit?: number;
 }
@@ -131,6 +135,14 @@ export const api = {
   /** 改写整个 `[score]` 段。改完分数就过期了，得再点一次重新打分。 */
   updateScore: (score: ScoreSettings) =>
     request<ConfigResponse>("/config/score", { method: "PUT", body: JSON.stringify(score) }),
+  /** LLM 打分的两段提示词（内置默认也会返回全文，页面上能直接改）。 */
+  prompts: () => request<PromptsResponse>("/config/prompts"),
+  /** 改写提示词。**空串 = 删掉覆盖文件、回到内置默认**。 */
+  updatePrompts: (payload: PromptsUpdate) =>
+    request<PromptsResponse>("/config/prompts", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
   tasks: () => request<TaskListResponse>("/tasks"),
   task: (taskId: string) => request<TaskResponse>(`/tasks/${taskId}`),
   createTask: (payload: CreateTaskRequest) =>

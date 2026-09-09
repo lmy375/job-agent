@@ -18,6 +18,7 @@ from job_agent.core.storage import (
     ApplicationRow,
     JobRow,
     KeywordCount,
+    LlmScoreStatus,
     SalarySummary,
     ScoreStatus,
 )
@@ -85,6 +86,9 @@ class OverviewResponse(BaseModel):
     score: ScoreStatus = Field(
         description="落库分数的新鲜度：改过 [score] 或采了新数据就该重跑 job score"
     )
+    llmScore: LlmScoreStatus = Field(
+        description="LLM 打分的覆盖率与口径一致性。按条计费，覆盖不全是常态，不算待办"
+    )
 
 
 class HealthResponse(BaseModel):
@@ -150,6 +154,9 @@ class ScoreRefreshResponse(BaseModel):
 class TaskKind(StrEnum):
     SEARCH = "search"
     DETAIL = "detail"
+    #: LLM 打分。**这个进队列**，而 [score] 重新打分不进——判据是「会不会发请求」：
+    #: 打分是本地计算，几千条一两秒；LLM 打分按条调 API、按条计费、要能取消
+    LLM_SCORE = "llm_score"
 
 
 class TaskStatus(StrEnum):
@@ -161,7 +168,7 @@ class TaskStatus(StrEnum):
 
 
 class TaskParams(BaseModel):
-    """采集任务的参数。按 kind 只有其中一部分有意义，其余保持默认。"""
+    """后台任务的参数。按 kind 只有其中一部分有意义，其余保持默认。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -174,6 +181,16 @@ class TaskParams(BaseModel):
         default=None, ge=1, le=MAX_ROWS, description="抓 JD 时本次最多抓多少条"
     )
     retry_failed: bool = Field(default=False, description="抓 JD 时连之前失败的一起重试")
+    #: 仅 llm_score。**必填**：按条计费，没有「不传就全打」这种默认
+    job_ids: list[int] | None = Field(
+        default=None, description="仅 llm_score：给这些 jobId 打分（必填，按条计费）"
+    )
+    llm_force: bool = Field(
+        default=False, description="仅 llm_score：同模型同提示词已打过的也重打"
+    )
+    llm_concurrency: int | None = Field(
+        default=None, ge=1, le=16, description="仅 llm_score：并发上限，省略取配置里的值"
+    )
 
 
 class CreateTaskRequest(BaseModel):
@@ -223,6 +240,20 @@ class SearchTaskResult(TaskResult):
     detail: DetailTaskResult | None = None
 
 
+class LlmScoreTaskResult(TaskResult):
+    """一次批量 LLM 打分的账单。四个计数加起来 = requested。"""
+
+    requested: int
+    scored: int
+    skipped: int
+    failed: int
+    cancelled: int
+    provider: str
+    model: str
+    fingerprint: str
+    errors: list[str] = Field(default_factory=list)
+
+
 class TaskView(BaseModel):
     """一个后台任务对前端的视图（不含日志）。
 
@@ -266,6 +297,42 @@ class TaskResponse(BaseModel):
 class TaskListResponse(BaseModel):
     tasks: list[TaskView]
     running: str | None = Field(default=None, description="正在执行或排队中的任务 id")
+
+
+class PromptView(BaseModel):
+    """一个维度的打分提示词。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str = Field(description="当前生效的全文（自定义的那份，或内置默认）")
+    isDefault: bool = Field(description="真 = 用的是内置默认，profile 里没有覆盖文件")
+    path: str = Field(description="覆盖文件该放的位置（不存在也给出来，好知道往哪写）")
+
+
+class PromptsResponse(BaseModel):
+    """两个维度的提示词 + 它们的指纹。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    appeal: PromptView
+    fit: PromptView
+    #: 两段最终文本的指纹。它一变，库里已有的 LLM 分数就不再可比
+    fingerprint: str
+    #: 这份提示词会配哪个模型跑（provider / model）
+    modelLabel: str
+
+
+class PromptsUpdate(BaseModel):
+    """改写两段提示词。
+
+    **空串 = 删掉覆盖文件、回到内置默认**，而不是「存一份空提示词」——
+    后者会让模型收到一段没有方法论的 system，分数直接变成瞎猜。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    appeal: str = ""
+    fit: str = ""
 
 
 class ErrorResponse(BaseModel):

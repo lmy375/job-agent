@@ -10,7 +10,8 @@ from __future__ import annotations
 import typer
 
 from job_agent.cli.state import CliState
-from job_agent.core.storage import ScoreStatus
+from job_agent.core.llm import load_score_prompts
+from job_agent.core.storage import LlmScoreStatus, ScoreStatus
 
 _TOP_KEYWORDS = 12
 
@@ -44,6 +45,13 @@ def stats(ctx: typer.Context) -> None:
     score = context.scores.status(settings.score.fingerprint)
     typer.echo(f"  已打分          {score.scored}{_score_note(score)}")
 
+    llm = context.llm_scores.status(
+        settings.llm_score_provider_name,
+        settings.llm_score_active.model,
+        load_score_prompts(settings).fingerprint,
+    )
+    typer.echo(f"  LLM 打分        {llm.scored}/{llm.scorable}{_llm_note(llm)}")
+
     typer.secho("\n按搜索关键词", bold=True)
     for row in context.jobs.keyword_counts()[:_TOP_KEYWORDS]:
         typer.echo(f"  {row.keyword:<16}{row.count:>6}")
@@ -58,6 +66,22 @@ def _score_note(score: ScoreStatus) -> str:
     if score.missing:
         return f"  ← 还有 {score.missing} 条有 JD 没打分，跑 job score"
     return f"（{score.scoredAt:%Y-%m-%d %H:%M}）" if score.scoredAt else ""
+
+
+def _llm_note(llm: LlmScoreStatus) -> str:
+    """LLM 打分的覆盖率提示。
+
+    「还有多少没打」刻意**不**说成待办：按条计费，大部分没打过是常态，
+    天天喊「还差 3000 条」只会让人学会忽略它。真该提醒的是口径不一致——
+    库里混着别的模型或别的提示词判出来的分数，那些和现在这批没法比。
+    """
+    if llm.scored == 0:
+        return "  ← 还没打过，跑 job llm-score --top 30"
+    note = f"（{llm.scoredAt:%Y-%m-%d %H:%M}）" if llm.scoredAt else ""
+    if llm.stale:
+        extra = llm.scored - llm.current
+        return f"{note}  ← 其中 {extra} 条是别的模型或旧提示词判的，与现在的口径不可比"
+    return note
 
 
 def _fmt(counts: dict[str, int]) -> str:

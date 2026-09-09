@@ -44,22 +44,50 @@ class CliState(BaseModel):
             self._context.close()
             self._context = None
 
-    def progress(self) -> ProgressPrinter:
-        return ProgressPrinter(quiet=self.quiet)
+    def progress(self, err: bool = False) -> ProgressPrinter:
+        """``err=True`` 把进度打到 stderr：命令要往 stdout 吐 JSON 时用。
+
+        管道另一头等的是一份能 ``json.loads`` 的文本，进度混进去就成了脏数据；
+        但一个跑几分钟的命令什么都不打也不行，所以是换条流，不是闭嘴。
+        """
+        return ProgressPrinter(quiet=self.quiet, err=err)
 
 
 class ProgressPrinter:
     """把服务层的进度事件打到终端。"""
 
-    def __init__(self, quiet: bool = False) -> None:
+    def __init__(self, quiet: bool = False, err: bool = False) -> None:
         self.quiet = quiet
+        self.err = err
 
     def __call__(self, event: ProgressEvent) -> None:
         if self.quiet and event.level == "info":
             return
         prefix = _ICONS[event.level]
         percent = f"[{event.percent:.0f}%] " if event.percent is not None else ""
-        typer.secho(f"{prefix} {percent}{event.message}", fg=_COLORS[event.level])
+        typer.secho(
+            f"{prefix} {percent}{event.message}", fg=_COLORS[event.level], err=self.err
+        )
+
+
+def band(low: float | None, high: float | None) -> str:
+    """年薪区间的终端写法（万元，税前）。解析不出来时留一个破折号。"""
+    if low is None or high is None:
+        return "—"
+    return f"{low:.0f}-{high:.0f}"
+
+
+def clip(text: str, width: int) -> str:
+    """按显示宽度截断（中文算两格），让终端里的列对得上。"""
+    out, used = [], 0
+    for char in text:
+        step = 2 if ord(char) > 0x2E80 else 1
+        if used + step > width:
+            out.append("…")
+            break
+        out.append(char)
+        used += step
+    return "".join(out)
 
 
 def echo_ok(message: str) -> None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from conftest import make_detail, make_job
-from job_agent.core.storage import JobQuery
+from job_agent.core.storage import JobQuery, LlmScoreEntry
 from job_agent.core.storage.repositories import MAX_ROWS
 
 
@@ -167,3 +167,38 @@ def test_reset_drops_and_recreates(context):
     assert context.applications.status_counts() == {}
     context.jobs.upsert_many([make_job(2)], keyword="AI Agent")
     assert context.jobs.count() == 1
+
+
+# ---------------------------------------------------------------- llm_scores
+
+
+def _llm_entry(job_id: int, appeal: int = 8, fit: int = 6) -> LlmScoreEntry:
+    return LlmScoreEntry(
+        jobId=job_id,
+        appealScore=appeal,
+        fitScore=fit,
+        appealReasons=["平台够大"],
+        fitReasons=["经验差两年"],
+    )
+
+
+def test_llm_scores_upsert_is_incremental(context):
+    """按条 upsert，不是整表重写：多采 10 条职位不该让已有的几百条分数消失。"""
+    repo = context.llm_scores
+    repo.upsert_many([_llm_entry(1)], "anthropic", "claude-opus-5", "fp1")
+    repo.upsert_many([_llm_entry(2)], "anthropic", "claude-opus-5", "fp1")
+    assert repo.count() == 2
+
+    repo.upsert_many([_llm_entry(1, appeal=3)], "anthropic", "claude-opus-5", "fp1")
+    assert repo.count() == 2
+    assert repo.current_ids("anthropic", "claude-opus-5", "fp1") == {1, 2}
+
+
+def test_llm_current_ids_is_scoped_by_model_and_prompt(context):
+    """「已经打过」只在同模型 + 同提示词下成立，换任意一个都该重打。"""
+    repo = context.llm_scores
+    repo.upsert_many([_llm_entry(1)], "anthropic", "claude-opus-5", "fp1")
+    assert repo.current_ids("anthropic", "claude-opus-5", "fp1") == {1}
+    assert repo.current_ids("anthropic", "claude-sonnet-5", "fp1") == set()
+    assert repo.current_ids("anthropic", "claude-opus-5", "fp2") == set()
+    assert repo.current_ids("deepseek", "claude-opus-5", "fp1") == set()
