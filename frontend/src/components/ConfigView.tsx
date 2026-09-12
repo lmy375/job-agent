@@ -77,7 +77,7 @@ function buildScore(form: ScoreForm): { payload?: ScoreSettings; problems: strin
     problems.push("薪资门槛要填 0 以上的数字，或者留空表示不过滤");
   }
   const multiplier = toNumber(form.titleMultiplier, "职位名权重倍数", problems);
-  const penalty = toNumber(form.requirePenalty, "不对口扣分", problems);
+  const penalty = toNumber(form.requirePenalty, "不匹配时扣分", problems);
 
   const signals: ScoreSignal[] = [];
   form.signals.forEach((row, index) => {
@@ -310,8 +310,19 @@ export default function ConfigView() {
                 onChange={(e) => setScore({ ...score, titleMultiplier: e.target.value })}
               />
             </label>
-            <label>
-              不对口扣分（负数）
+          </div>
+          <div className="editor-row">
+            <label className="grow">
+              硬性要求关键词（职位名与 JD 正文都不匹配这些关键词就大额扣分；留空 = 不检查）
+              <input
+                className="mono"
+                value={score.requirePattern}
+                placeholder="(?a:\bagent\b)|智能体|大模型"
+                onChange={(e) => setScore({ ...score, requirePattern: e.target.value })}
+              />
+            </label>
+            <label className="narrow">
+              不匹配时扣分（负数）
               <input
                 type="number"
                 step="1"
@@ -320,15 +331,6 @@ export default function ConfigView() {
               />
             </label>
           </div>
-          <label>
-            必须命中的赛道词（职位名与 JD 里都找不到就扣上面那一刀；留空 = 不兜底）
-            <input
-              className="mono"
-              value={score.requirePattern}
-              placeholder="(?a:\bagent\b)|智能体|大模型"
-              onChange={(e) => setScore({ ...score, requirePattern: e.target.value })}
-            />
-          </label>
 
           <div className="table-wrap">
             <table className="signals">
