@@ -9,10 +9,11 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
-from job_agent.config import ConfigPaths, ScoreConfig, Settings
+from job_agent.config import ConfigPaths, ConfigScope, ScoreConfig, Settings
 from job_agent.core.liepin.enums import JobKind
 from job_agent.core.storage import (
     ApplicationRow,
@@ -138,6 +139,109 @@ class ScoreUpdate(ScoreConfig):
     前端发来的那份就是能落盘的那份。
     """
 
+
+class SectionView(BaseModel):
+    """一个配置段在**文件里**的样子。
+
+    ``values`` 刻意从文件读、不从 :class:`~job_agent.config.Settings` 读：
+    后者的路径字段在 loader 里已经解析成绝对路径，照它写回去会把
+    ``data/jobs.db`` 换成某台机器上的绝对路径，profile 目录就不能整份拷给别人了。
+
+    它是这一层唯一的裸 dict，理由是十几个段是十几个不同的模型，
+    在这里再抄一份联合类型等于把配置树抄第二遍。服务端已经按段名对应的模型
+    校验过（``extra="forbid"`` 会挡下拼错的字段），前端拿到的就是能落盘的那份。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    scope: ConfigScope
+    #: 这一段写回哪个文件，绝对路径
+    file: str
+    values: dict[str, Any]
+
+
+class SectionsResponse(BaseModel):
+    """所有可写的配置段。一次全给——段总共十来个，分开取只会多十来个往返。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    sections: list[SectionView]
+
+
+class SectionUpdate(BaseModel):
+    """改写一整段。段名在路径里，这里只装值。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    values: dict[str, Any] = Field(description="整段的新值，按段名对应的配置模型校验")
+
+
+class ConfigFileView(BaseModel):
+    """一个配置文件的原文（「高级」页的文本编辑器）。
+
+    **含密钥明文**：服务只监听本机、单人使用，「打得开这个页面」与
+    「cat 得到这个文件」是同一份权限，打码只会让人没法在页面上填 token。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    scope: ConfigScope
+    path: str
+    text: str
+    #: 文件不存在也返回（``text`` 为空串）——profile.toml 缺失是合法状态
+    exists: bool
+
+
+class ConfigFilesResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    files: list[ConfigFileView]
+
+
+class ConfigFileUpdate(BaseModel):
+    """整份替换一个配置文件。落盘前先 parse + 按模型校验，坏内容进不去。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+
+
+class DocKind(StrEnum):
+    """profile 目录下的自由 Markdown。
+
+    和 ``[score]`` 那些结构化配置分在两边的判据是**格式**（自由文本 vs TOML），
+    不是话题——见 CLAUDE.md 的 profile 一节。
+    """
+
+    RESUME = "resume"
+    PREFERENCES = "preferences"
+
+
+class DocView(BaseModel):
+    """一份自由 Markdown 的全文。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: DocKind
+    path: str
+    content: str
+    exists: bool
+
+
+class DocsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    docs: list[DocView]
+
+
+class DocUpdate(BaseModel):
+    """整份替换。空内容也照写——简历写了一半存一下是正常操作，
+    不像提示词那样「空 = 回到内置默认」。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
 
 class ScoreRefreshResponse(BaseModel):
     """一次重新打分的结果，等价于命令行跑一次 ``job score``。"""

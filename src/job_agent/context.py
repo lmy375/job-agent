@@ -98,7 +98,8 @@ class AppContext(BaseModel):
         if fresh.storage.database != self.settings.storage.database:
             raise ConfigError(
                 f"[storage].database 改了（{self.settings.storage.database} → "
-                f"{fresh.storage.database}），热加载不换库连接，请重启服务"
+                f"{fresh.storage.database}）。**改动已经写进文件了**，"
+                "但热加载不换库连接，重启服务才会生效"
             )
         self.settings = fresh
         return fresh

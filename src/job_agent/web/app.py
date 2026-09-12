@@ -31,7 +31,10 @@ DESCRIPTION = """
 - `/api/jobs` 职位列表与详情、投递
 - `/api/tasks` 后台任务（搜索 / 抓详情 / LLM 打分）
 - `/api/scores/refresh` 按当前 `[score]` 重新打分（= `job score`）
-- `/api/config` 当前配置；搜索关键词、`[score]`、LLM 打分提示词可改（写回 profile 目录）
+- `/api/config` 当前生效的配置（含密钥明文——本机单人用，看网页等于看文件）
+- `/api/config/sections` 每个配置段在文件里的值；`PUT .../{段名}` 按段改
+- `/api/config/files` 两个配置文件的原文；`PUT .../{global|profile}` 整份改
+- `/api/config/docs` 简历与求职偏好
 - `/api/config/prompts` LLM 打分两个维度的提示词（= `job llm-score` 用的那两段）
 - `/api/stats` 库内数据概览
 """

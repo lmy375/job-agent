@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -185,9 +183,11 @@ def test_rescore_without_jd_is_400(client, context):
 
 def test_update_keywords_writes_the_profile_file(client, context, profile_dir):
     """页面上改关键词 = 改 profile.toml：生效的永远是文件里那份。"""
+    sections = {s["name"]: s for s in client.get("/api/config/sections").json()["sections"]}
+    values = dict(sections["search"]["values"])
     body = client.put(
-        "/api/config/keywords",
-        json={"keywords": ["  Claude Code ", "AI 工程", "AI 工程", ""]},
+        "/api/config/sections/search",
+        json={"values": {**values, "keywords": ["  Claude Code ", "AI 工程", "AI 工程", ""]}},
     ).json()
 
     # 归一走 SearchConfig：去空白、丢空串、去重且保序
@@ -211,7 +211,7 @@ def test_update_score_makes_stored_scores_stale(client, seeded, profile_dir):
         "require": {"pattern": r"(?a:\bagent\b)|智能体", "penalty": -25.0},
         "signals": [{"name": "Agent", "weight": 12, "pattern": r"(?a:\bagent\b)|智能体"}],
     }
-    body = client.put("/api/config/score", json=payload).json()
+    body = client.put("/api/config/sections/score", json={"values": payload}).json()
     assert body["settings"]["score"]["title_multiplier"] == 3.0
     assert body["settings"]["score"]["signals"][0]["weight"] == 12.0
     assert seeded.settings.score.salary_floor_wan == 150.0
@@ -231,28 +231,102 @@ def test_update_score_makes_stored_scores_stale(client, seeded, profile_dir):
 
 
 def test_update_score_rejects_broken_regex(client, seeded, profile_dir):
-    """正则编译不过就 422，并且**不落盘**——坏配置写进去下次连服务都起不来。"""
+    """正则编译不过就拒绝，并且**不落盘**——坏配置写进去下次连服务都起不来。"""
     before = (profile_dir / "profile.toml").read_text(encoding="utf-8")
     response = client.put(
-        "/api/config/score",
-        json={"signals": [{"name": "坏正则", "weight": 5, "pattern": "(未闭合"}]},
+        "/api/config/sections/score",
+        json={"values": {"signals": [{"name": "坏正则", "weight": 5, "pattern": "(未闭合"}]}},
     )
-    assert response.status_code == 422
-    # 报错要指到具体哪条信号的哪个字段（前端把 loc 拼出来给人看），
+    assert response.status_code == 400
+    # 报错要指到具体哪条信号的哪个字段（页面上直接显示这段），
     # 而不是笼统一句「请求失败」——几十条信号里找那个写错的正则全靠它
-    problem = response.json()["detail"][0]
-    assert problem["loc"] == ["body", "signals", 0, "pattern"]
-    assert "不是合法正则" in problem["msg"]
+    detail = response.json()["detail"]
+    assert "signals.0.pattern" in detail.replace(" -> ", ".").replace("\n", " ")
+    assert "不是合法正则" in detail
     assert (profile_dir / "profile.toml").read_text(encoding="utf-8") == before
     assert seeded.settings.score.signals[0].name == "Agent"
 
 
-def test_config_masks_secrets(client):
-    """接口把整棵配置树返回给前端，密钥必须是打码后的（SecretStr 自动完成）。"""
+def test_config_reveals_secrets_to_the_page(client):
+    """配置页要能填 token，所以这个接口给明文。
+
+    「打得开这个页面」与「cat 得到这个文件」在本机单人的场景里是同一份权限，
+    打码只会让人没法在页面上改密钥。明文仍然是**主动要来**的：
+    默认序列化照旧打码，见 test_secret_is_masked_unless_asked。
+    """
     body = client.get("/api/config").json()
-    assert body["settings"]["liepin"]["accounts"]["default"]["user_token"] == "**********"
-    assert "test-token" not in json.dumps(body)
+    assert body["settings"]["liepin"]["accounts"]["default"]["user_token"] == "test-token"
     assert body["paths"]["database"].endswith("test.db")
+
+
+def test_sections_cover_every_config_section(client, context):
+    """页面上能改的就是全部配置项：段名表由模型遍历得出，接口不该少给。"""
+    from job_agent.config import config_sections
+
+    sections = {item["name"]: item for item in client.get("/api/config/sections").json()["sections"]}
+    assert set(sections) == set(config_sections())
+
+    # 值从**文件**读，不是从生效的配置树：相对路径必须还是相对路径，
+    # 原样发回来保存才不会被换成某台机器上的绝对路径
+    assert sections["storage"]["values"]["database"] == "data/test.db"
+    assert context.settings.storage.database.is_absolute()
+    # 段各自写回哪个文件，前端据此在「高级」页里分组
+    assert sections["liepin"]["scope"] == "global"
+    assert sections["score"]["scope"] == "profile"
+
+
+def test_update_global_section_writes_config_toml(client, context, project_root):
+    """全局段也能在页面上改——token 属于「怎么连」，但填它是新用户的第一步。"""
+    values = {
+        s["name"]: s["values"] for s in client.get("/api/config/sections").json()["sections"]
+    }["liepin"]
+    values["rate_limit_per_min"] = 5
+    values["accounts"]["default"]["user_token"] = "new-token"
+
+    body = client.put("/api/config/sections/liepin", json={"values": values}).json()
+
+    assert body["settings"]["liepin"]["rate_limit_per_min"] == 5
+    text = (project_root / "config" / "config.toml").read_text(encoding="utf-8")
+    assert "rate_limit_per_min = 5" in text
+    assert "new-token" in text
+    # 内存里的配置也换了，不用重启服务
+    assert context.settings.require_token() == "new-token"
+
+
+def test_config_files_give_raw_text_and_validate_before_writing(client, profile_dir):
+    """「高级」页给的是原文（含注释、含密钥明文），坏内容一个字节都不许落盘。"""
+    files = {item["scope"]: item for item in client.get("/api/config/files").json()["files"]}
+    assert "[score]" in files["profile"]["text"]
+    assert "test-token" in files["global"]["text"]
+
+    before = (profile_dir / "profile.toml").read_text(encoding="utf-8")
+    assert client.put("/api/config/files/profile", json={"text": "[search"}).status_code == 400
+    assert (profile_dir / "profile.toml").read_text(encoding="utf-8") == before
+
+    # 字段不合法也拦下来：校验走的就是平时加载配置的那个模型
+    bad = client.put("/api/config/files/profile", json={"text": "[search]\nmax_pages = 99\n"})
+    assert bad.status_code == 400
+    assert (profile_dir / "profile.toml").read_text(encoding="utf-8") == before
+
+    # 合法内容照写。``[storage]`` 得留着——换库路径是热加载换不了的东西，
+    # reload 会拒绝（那条保护单独有用例）
+    good = '[search]\nmax_pages = 2\n\n[storage]\ndatabase = "data/test.db"\n'
+    ok = client.put("/api/config/files/profile", json={"text": good})
+    assert ok.status_code == 200
+    assert ok.json()["settings"]["search"]["max_pages"] == 2
+    assert (profile_dir / "profile.toml").read_text(encoding="utf-8") == good
+
+
+def test_docs_round_trip(client, profile_dir):
+    """简历与求职偏好是 LLM 打分的判断依据，得能在页面上直接改。"""
+    docs = {item["kind"]: item for item in client.get("/api/config/docs").json()["docs"]}
+    assert docs["resume"]["content"] == "# 测试简历\n"
+    assert docs["preferences"]["exists"] is True
+
+    body = client.put("/api/config/docs/resume", json={"content": "# 新简历\n- 6 年后端"}).json()
+    written = {item["kind"]: item for item in body["docs"]}["resume"]
+    assert written["content"].startswith("# 新简历")
+    assert (profile_dir / "resume.md").read_text(encoding="utf-8") == "# 新简历\n- 6 年后端\n"
 
 
 def test_config_reports_current_profile(client):
