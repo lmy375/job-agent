@@ -2,7 +2,10 @@
 
 **打分只做分诊**：把几百条砍到几十条，交给人或 skill 去读 JD 下判断。
 它不回答「该不该投」——「这个岗要 50 人管理经验而你带 5 人」这种判断
-需要读懂文字，是 skill 的事（见 ``.claude/skills/job-match``）。
+需要读懂文字，归 ``job llm-score``（模型读 JD）或人自己读 JD。
+
+信号表准不准，拿 LLM 分当参照对一遍就知道：见 :mod:`~job_agent.core.matching.align`
+与 ``/job-align`` skill。
 
 因此这里刻意保留了每条命中/扣分的**理由**：排名本身不可信，
 理由才是让人能快速复核「为什么它排第一」的东西。
@@ -78,11 +81,15 @@ class ScoredJob(BaseModel):
         return "、".join(h.label() for h in self.penalties)
 
 
+def body_text(row: JobFacts) -> str:
+    """打分时当「JD 正文」搜的那段文本。``align`` 拆子模式时要用同一份定义。"""
+    return " ".join((row.description, row.responsibilities, row.requirements))
+
+
 def score_row(row: JobFacts, rules: ScoreConfig) -> ScoredJob:
     """给一行打分。同一条信号在标题和正文都命中时只算标题（取高的那份）。"""
     title = row.jobName
-    body = " ".join((row.description, row.responsibilities, row.requirements))
-    haystack = f"{title}\n{body}"
+    haystack = f"{title}\n{body_text(row)}"
 
     scored = ScoredJob(row=row, score=0.0)
     for signal in rules.signals:

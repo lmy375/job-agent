@@ -32,6 +32,7 @@ from job_agent.core.storage.rows import (
     JobRow,
     KeywordCount,
     LlmScoreEntry,
+    LlmScoreRow,
     LlmScoreStatus,
     PendingDetail,
     SalarySummary,
@@ -541,6 +542,13 @@ class LlmScoreRepository:
     def count(self) -> int:
         with self.db.session() as s:
             return s.scalar(select(func.count()).select_from(LlmScoreRecord)) or 0
+
+    def all(self) -> list[LlmScoreRow]:
+        """整表读出。校准信号表要拿全部 LLM 分数当参照，不按口径过滤——
+        混着几种口径由调用方自己判（:class:`LlmScoreRow` 带着盖章字段）。"""
+        with self.db.session() as s:
+            records = s.scalars(select(LlmScoreRecord).order_by(LlmScoreRecord.jobId))
+            return [LlmScoreRow.model_validate(r) for r in records]
 
     def status(self, provider: str, model: str, fingerprint: str) -> LlmScoreStatus:
         """覆盖率与新鲜度。

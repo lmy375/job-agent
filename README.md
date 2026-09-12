@@ -56,13 +56,15 @@ uv run job profile use web3  # 把它设成默认，之后不用每次带 -p
 后续要调**搜索关键词**与**打分逻辑**，在 `job web` 的「配置」页改最省事——
 它写回的就是 `profile.toml` 那两段（见「Web 管理台」）。
 
-采完数据之后**跑 `/job-match`**：它读 JD、比硬门槛、排投递优先级、写投递口径，
-把 `job score -o` 留白的判断部分填掉。完整流程：
+采完数据之后 `job score` 分诊、`job llm-score` 让模型读 JD 打分，在 `job web`
+里按两个分数翻着看、点投递。打过几十条 LLM 分之后**跑 `/job-align`**：
+它拿模型的分当参照，把关键词信号表校准一遍。完整流程：
 
 ```
 job profile new <名字> → /job-init          # 一次性：建 profile、填简历与关键词
-job search → job score → job score -o → /job-match → job apply
-          ↘ job llm-score --top 30   （可选：让模型给两个维度打分，看得懂语义门槛）
+job search → job score → job llm-score --top 30 → job web 翻 JD、点投递 → job apply
+          ↘ job align → /job-align   （有了 LLM 分之后：对照它校准 [score] 信号表）
+          ↘ job score -o data/shortlist.md （候选清单骨架，判断部分留白）
           ↘ job web （翻 JD、看库存、点投递、改关键词与打分逻辑、批量 LLM 打分）
 ```
 
@@ -101,7 +103,7 @@ scripts/               一次性脚本（导出、关键词覆盖率核对）
 tests/                 pytest（不碰真实库、不发网络请求）
 .claude/skills/
   job-init/            `/job-init`：交互式收集信息并填好 config/
-  job-match/           `/job-match`：读 JD、比硬门槛、排投递优先级、写投递口径
+  job-align/           `/job-align`：对照 LLM 分校准 [score] 信号表（驱动 job align）
 ```
 
 依赖方向单向：`cli` / `web` → `core` → `config`，`agent` → `core` → `config`。
@@ -205,7 +207,7 @@ skill 与外部脚本靠它定位文件——路径随 profile 变，不该在�
 「职位已结束」）都会记进本地 `applications` 表——**猎聘没有查询投递记录的接口**，
 这张表是唯一的账本。
 
-## 挑岗位：`job score` / `/job-match`
+## 挑岗位：`job score` / `job llm-score`
 
 采集解决「有哪些岗」，这两样解决「该投哪几个」。分界线是**确定性 vs 判断**：
 
@@ -244,7 +246,7 @@ pattern = '预训练|后训练|强化学习|模型训练'
 - **薪资门槛过滤的是「上限」不是「下限」**。JD 区间的上限才代表「这家最多给到多少」；
   按下限过滤会误杀「50-80k·20薪」这类实际能谈上去的岗位。
 - **分数只做分诊，不代表结论。** 它把几百条砍到几十条；
-  「这个岗要 50 人管理经验而你带 5 人」这种判断要读 JD，是 `/job-match` 的事。
+  「这个岗要 50 人管理经验而你带 5 人」这种判断要读 JD，是 `job llm-score` 的事。
   第 1 名可能有硬门槛冲突，第 8 名可能才是最该投的。
 
 ### 两种打分的分工
@@ -295,13 +297,42 @@ uv run job llm-score --top 30 --provider deepseek   # 临时换个便宜模型
 `[llm_score].provider` 指其中一个（留空 = 跟随 `[agent].provider`），
 `[llm_score].concurrency` 控并发（默认 4）。
 
-`-o` 产出的 Markdown 里，每条岗位有三处 `<待 /job-match 填写>`：
+`-o` 产出的 Markdown 里，每条岗位有三处 `<待读 JD 后填写>`：
 **硬门槛核对**、**投不投**、**投递口径**。代码刻意不填——填了模板话术，
 人会以为已经分析过了，比留空更糟。
 
+### 校准信号表：`job align` / `/job-align`
+
+信号表第一版是访谈拍出来的。打过一批 LLM 分之后，两套分数就能互相对照：
+**关键词分诊有没有把模型认可的岗位送进视野？**
+
+```bash
+uv run job align                      # 秩相关、窗口召回、逐条信号命中均分、漏网与误报
+uv run job align --split              # 每条信号按顶层 | 拆成子模式，看哪个词在乱命中
+uv run job align --probe 'agent\s*infra' --context   # 试一条候选正则，附命中快照
+uv run job align --top 60 --appeal-floor 8            # 窗口与分数线都是参数
+uv run job align --json -o data/align.json
+```
+
+它只算统计、不写库、不给建议。「认可」（吸引力 ≥7 且匹配 ≥5）与「明确不看」
+（吸引力 ≤4）的分数线默认对齐内置提示词的锚点，改过提示词就一起改参数。
+「砍哪个词、权重调到几、要不要加一条头衔信号」是判断——在 Claude Code 里跑
+`/job-align`，它读统计、看快照、改 `[score]`、复测，并把偏好里没写全的地方
+（模型因此判错的那类岗位）交还给你。skill 对任何 profile 都成立：它不含方向取向，
+只从这个 profile 的 `preferences.md` 与 `[score]` 注释里读。
+
+三个要知道的口径：
+
+- **样本要够、要覆盖到关键词排名靠后的岗位。** 只打了前 30 条 LLM 分，
+  永远看不到「关键词排 200 名但模型认可」的漏网。
+- **口径要统一。** 库里混着换过模型或改过提示词的分数时 `job align` 会警告，
+  它们互相不可比。
+- **模型也会错。** 它照 `preferences.md` 判，偏好没写全的地方它就会判错——
+  那是偏好的问题，不是信号表的问题，也不要为了迎合它删负信号。
+
 ## 无人值守：`job agent`（LangGraph 路线）
 
-`/job-match` 是交互式的：你和 Claude 一起读 JD、改口径。`job agent` 是同一条流程的
+CLI + Web 是交互式的：你翻 JD、看两套分数、点投递。`job agent` 是同一条流程的
 无人值守版——LangGraph 组的固定管线，一条命令跑完 **分诊 → 逐岗审读 → 投递计划**，
 共享同一个数据库、同一份 `config/`：
 

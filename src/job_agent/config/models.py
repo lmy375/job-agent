@@ -84,7 +84,7 @@ class ProfilesConfig(_Model):
 class ProfileConfig(_Model):
     """求职者信息（profile 文件）。
 
-    ``resume`` 与 ``preferences`` 是 ``/job-match`` 挑岗位、写投递口径时的输入，
+    ``resume`` 与 ``preferences`` 是 ``job llm-score`` 送给模型比硬门槛、判方向的输入，
     也是 ``job-init`` skill 访谈后落地的两个文件。程序不解析它们的内容——
     刻意保持自由格式的 Markdown，人和模型都好读好改。
     """

@@ -200,12 +200,13 @@ uv run job -p <名字> search -k "<某个关键词>" --pages 1 --no-detail   # �
 然后告诉用户完整流程：
 
 ```
-job search → job score → job score -o → /job-match → job apply
-          ↘ job web （翻 JD、看库存、点投递）
+job search → job score → job llm-score --top 30 → job web 翻 JD、点投递 → job apply
+          ↘ job align → /job-align （有了 LLM 分之后：对照它校准信号表）
 ```
 
 `job search`（搜完自动抓 JD）与 `job score` 是确定性的（可重跑、两次一样），
-`/job-match` 那一步是判断（读 JD 挑岗位）。
+`job llm-score` 那一步是判断（模型读 JD 比硬门槛、判方向，结果落库）。
+信号表第一版是访谈拍出来的，打过几十条 LLM 分之后跑 `/job-align` 校准一次。
 每条命令都能加 `-p <名字>`；这个 profile 是默认的话可以省。
 
 并提醒：`config/config.toml` 与整个 `profiles/` 都不进版本库（`.gitignore` 已配好），

@@ -166,6 +166,22 @@ class LlmScoreEntry(BaseModel):
     fitReasons: list[str] = Field(default_factory=list)
 
 
+class LlmScoreRow(BaseModel):
+    """``llm_scores`` 表的一行，含盖章字段。校准信号表（``job align``）要整表读出来。"""
+
+    model_config = ConfigDict(extra="forbid", from_attributes=True)
+
+    jobId: int
+    appealScore: int
+    fitScore: int
+    appealReasons: list[str] = Field(default_factory=list)
+    fitReasons: list[str] = Field(default_factory=list)
+    provider: str = ""
+    model: str = ""
+    promptFingerprint: str = ""
+    scoredAt: datetime
+
+
 class LlmScoreStatus(BaseModel):
     """LLM 打分的覆盖率与新鲜度。
 

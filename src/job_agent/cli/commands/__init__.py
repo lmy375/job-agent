@@ -6,6 +6,7 @@ import typer
 
 from job_agent.cli.commands import (
     agent_cmd,
+    align_cmd,
     apply_cmd,
     config_cmd,
     db_cmd,
@@ -35,6 +36,13 @@ def register(app: typer.Typer) -> None:
             "按条计费，必须用 jobId / --top / --all 说清楚打哪些。"
         ),
     )(llm_score_cmd.llm_score)
+    app.command(
+        "align",
+        help=h(
+            "拿库里的 LLM 分当参照给 [score] 信号表体检：秩相关、窗口召回、逐条信号的"
+            "命中均分、漏网与误报、候选正则探针。只算统计，不写库。"
+        ),
+    )(align_cmd.align_cmd)
     app.command("apply", help="投递职位（可传多个 jobId）。")(apply_cmd.apply)
     app.command(
         "agent",

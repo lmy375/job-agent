@@ -239,5 +239,6 @@ def _emit_table(summary: LlmScoreSummary, why: bool) -> None:
     typer.echo(
         "\n两个分数是并列的，代码不替你合成总分："
         "吸引力高但胜任度低 = 值得投但要准备说服，反过来 = 稳但未必想去。"
-        "\n下一步：job web 在页面上按任一列排序，或跑 /job-match 让 Claude 逐条读 JD。"
+        "\n下一步：job web 在页面上按任一列排序；打够了样本就跑 job align，"
+        "看关键词信号表跟模型判断差在哪（/job-align 帮你改）。"
     )

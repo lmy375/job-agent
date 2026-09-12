@@ -4,7 +4,7 @@
 命中与扣分的信号、JD 摘录、链接。
 
 「硬门槛对得上吗」「投不投」「怎么谈」三处一律留成待填标记——
-它们需要读懂 JD 才能回答，属于 ``/job-match`` skill 的工作。
+它们需要读懂 JD 才能回答——``job llm-score`` 让模型读，或人自己读。
 如果代码替它们填上模板话术，人会以为已经分析过了，这比留空更糟。
 """
 
@@ -18,8 +18,8 @@ from pathlib import Path
 from job_agent.config import Settings
 from job_agent.core.matching.scorer import ScoredJob
 
-#: 留给 skill 填的标记。用同一个串，便于 skill 自检「还有几处没填」
-TODO = "<待 /job-match 填写>"
+#: 留给人（或模型）填的标记。用同一个串，便于自检「还有几处没填」
+TODO = "<待读 JD 后填写>"
 
 _WS_RE = re.compile(r"\s+")
 #: JD 摘录长度。够看清岗位在干什么，又不至于让清单长到没法读
@@ -63,7 +63,7 @@ def render_shortlist(
         "> **这份文件只有一半是自动生成的。** 岗位、薪资、命中信号由代码算出，",
         "> 可重跑、两次一样；「硬门槛核对」「投不投」「投递口径」三处标着"
         f" `{TODO}`，",
-        "> 需要逐条读 JD 才能回答——跑 `/job-match` 让 Claude 填，或自己填。",
+        "> 需要逐条读 JD 才能回答——`job llm-score` 的两个分数与依据是现成的参考，或自己读 JD 填。",
         ">",
         "> 两个必读的口径：",
         ">",

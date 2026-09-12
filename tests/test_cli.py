@@ -15,6 +15,7 @@ from job_agent.cli import app
 from job_agent.context import AppContext
 from job_agent.core.liepin.errors import LiepinRateLimited
 from job_agent.core.liepin.models import ApplyJobResult
+from job_agent.core.matching.shortlist import TODO
 from job_agent.core.services import DetailService, SearchService
 from job_agent.core.services.detail import DetailSummary
 from job_agent.core.services.search import SearchSummary
@@ -293,7 +294,7 @@ def seed_agent_job(context, job_id: int = 1, salary: str = "80-100k·20薪") -> 
 
 def test_help_lists_new_commands():
     result = runner.invoke(app, ["--help"])
-    for command in ("score", "resume", "profile"):
+    for command in ("score", "resume", "profile", "align"):
         assert command in result.stdout
 
 
@@ -360,7 +361,7 @@ def test_score_output_writes_shortlist(config_path, context, tmp_path):
     assert target.is_file()
     body = target.read_text(encoding="utf-8")
     assert "Agent 平台工程师" in body
-    assert "<待 /job-match 填写>" in body
+    assert TODO in body
 
 
 def test_score_output_relative_lands_in_profile(config_path, profile_dir, context):

@@ -4,7 +4,7 @@
 改了权重就再跑一次，Web 端和后续命令读到的都是新分数。
 
 打分是**确定性**的：同一份数据、同一份信号表，两次跑出来的分数与排序完全一样。
-「该不该投」那一步是判断，归 ``/job-match`` skill，不在这里。
+「该不该投」那一步是判断，归 ``job llm-score``（模型读 JD）或人，不在这里。
 
 落库的是**全量、未过滤**的分数与全库排名；``--floor`` / ``-n`` / 去重只影响
 这次**看到**什么，不影响写进库里的名次。
@@ -142,7 +142,7 @@ def score(
     typer.echo("")
     typer.secho(f"{scope}：{len(jobs)} 条，按分数排序（前 {min(limit, len(jobs))} 条）", bold=True)
     typer.secho(
-        "  分数只做分诊，不代表结论——该不该投要读 JD，跑 /job-match。",
+        "  分数只做分诊，不代表结论——该不该投要读 JD：job llm-score 让模型读，或自己翻。",
         fg=typer.colors.BRIGHT_BLACK,
     )
     typer.echo("")
@@ -158,8 +158,8 @@ def score(
                 typer.secho(f"        − {job.concerns()}", fg=typer.colors.YELLOW)
 
     typer.echo(
-        "\n下一步：job score -n 12 -o data/shortlist.md 生成候选清单骨架，"
-        "再跑 /job-match 让 Claude 逐条读 JD；或 job web 在页面上按分数翻。"
+        "\n下一步：job llm-score --top 30 让模型读 JD 打两个维度的分；"
+        "job web 在页面上按分数翻；job score -n 12 -o data/shortlist.md 写出候选清单骨架。"
     )
 
 
@@ -186,7 +186,7 @@ def _write_shortlist(
     echo_ok(f"候选清单已生成（{min(limit, len(jobs))}/{len(jobs)} 条）：{path}")
     typer.echo(
         f"\n里面有 {content.count(TODO)} 处 `{TODO}` 等着填——那是需要读 JD 才能回答的部分。"
-        "\n下一步：在 Claude Code 里跑 `/job-match`，它会逐条读 JD、比硬门槛、排投递优先级。"
+        "\n下一步：逐条读 JD 填掉它们——`job llm-score <jobId>` 能让模型先给出两个维度的依据。"
     )
 
 

@@ -12,7 +12,7 @@
 
 # ---------------------------------------------------------------- 求职者
 [profile]
-# 求职者信息。resume / preferences 是 /job-match 挑岗位、写投递口径时的输入，
+# 求职者信息。resume / preferences 是 `job llm-score` 送给模型比硬门槛、判方向的输入，
 # 程序不解析内容，自由格式 Markdown 即可（`/job-init` skill 会引导你写）
 name = "你的名字"
 # 用全局 [liepin.accounts.*] 里的哪个账号搜索与投递。
@@ -98,7 +98,8 @@ database = "data/jobs.db"
 #   4. 最后按 [score.require] 判一次「是否完全不对口」
 #
 # 分数只用来**分诊**（把几百条砍到几十条），不代表结论。
-# 「该不该投」要读 JD——跑 `/job-match`。
+# 「该不该投」要读 JD——跑 `job llm-score` 让模型读。
+# 信号表准不准，有了 LLM 分之后跑 `job align` 量一量，`/job-align` 帮你改。
 
 [score]
 # 只看薪资**上限**不低于这个数的岗位（万元/年）。留空表示不过滤。
