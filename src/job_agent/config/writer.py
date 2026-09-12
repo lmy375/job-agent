@@ -61,6 +61,7 @@ from job_agent.config.models import (
     ProfileSettings,
     ScoreConfig,
     SearchConfig,
+    Signal,
 )
 from job_agent.errors import ConfigError
 
@@ -89,19 +90,202 @@ def write_keywords(profile_file: Path, keywords: Sequence[str]) -> Path:
         )
 
     first, last = array
-    kept = _comment_lines(lines[first + 1 : last - 1])
-    block = _render_keywords(keywords, kept)
+    body = lines[first + 1 : last - 1]
+    patched = _patch_keywords(body, keywords) if _is_block_array(lines, first, last) else None
+    if patched is not None:
+        block = [lines[first], *patched, lines[last - 1]]
+    else:
+        # 顺序真的变了（或者数组写法认不出来）：只能整份重排。
+        # 注释掉的候选词留着，但会被归到数组末尾
+        block = _render_keywords(keywords, _comment_lines(body))
     return _write_lines(profile_file, [*lines[:first], *block, *lines[last:]])
 
 
-def write_score(profile_file: Path, score: ScoreConfig) -> Path:
-    """整段重写 ``[score]``（含 ``[score.require]`` 与全部 ``[[score.signals]]``）。
+def _is_block_array(lines: list[str], first: int, last: int) -> bool:
+    """数组是不是「一行一个词」的块写法：首行到 ``[`` 为止，末行只有 ``]``。
 
-    整段而不是逐项改：信号是一个**数组**，改一条的位置会牵动其余几十条的行号，
-    定点替换的代价远高于把这一段重新渲染一遍。
+    ``keywords = ["a", "b"]`` 这种一行写完的不算——按行定点替换对不上，
+    而且它本来也没有分组注释可保。
+    """
+    if last - first < 2:
+        return False
+    head, _ = _split_comment(lines[first])
+    tail, _ = _split_comment(lines[last - 1])
+    return head.rstrip().endswith("[") and tail.strip() == "]"
+
+
+def _patch_keywords(body: list[str], keywords: Sequence[str]) -> list[str] | None:
+    """按词定点改数组：留下的词原样不动，删掉的删行，新词接在最后一个词后面。
+
+    返回 ``None`` 表示做不到，调用方退回整份重排。两种情况：一行写了多个词
+    （认不出哪个是哪个），或者留下来的词**顺序变了**——顺序就是优先级，
+    那种时候只能重排，代价是数组里的分组注释会被归到末尾。
+
+    在意这件事是因为那些注释是**分组说明**（「优先方向」「宽词兜底」），
+    一旦被冲到数组底部，它说的是哪几个词就再也看不出来了。而加词删词是
+    这个页面上最高频的动作，每次都重排一遍等于很快就把说明全洗掉。
+    """
+    entries: list[tuple[int, str]] = []
+    for index, line in enumerate(body):
+        code, _ = _split_comment(line)
+        if not code.strip():
+            continue
+        try:
+            parsed = tomllib.loads(f"x = [{code}]")["x"]
+        except tomllib.TOMLDecodeError:
+            return None
+        if len(parsed) != 1 or not isinstance(parsed[0], str):
+            return None
+        entries.append((index, parsed[0]))
+
+    wanted = list(keywords)
+    survivors = [word for _, word in entries if word in set(wanted)]
+    existing = {word for _, word in entries}
+    if survivors != [word for word in wanted if word in existing]:
+        return None
+
+    keep_at = {index for index, word in entries if word in set(wanted)}
+    value_lines = {index for index, _ in entries}
+    last_kept = max(keep_at, default=-1)
+    out: list[str] = []
+    for index, line in enumerate(body):
+        if index in value_lines and index not in keep_at:
+            continue  # 这个词被删了
+        out.append(line)
+        if index == last_kept:
+            out += [f"  {_toml_str(word)},\n" for word in wanted if word not in existing]
+    if last_kept < 0:
+        # 一个旧词都没留下：新词接在所有注释之后
+        out += [f"  {_toml_str(word)},\n" for word in wanted]
+    return out
+
+
+def write_score(profile_file: Path, score: ScoreConfig) -> Path:
+    """改写 ``[score]``（含 ``[score.require]`` 与全部 ``[[score.signals]]``）。
+
+    **按条定点替换，不整段重写。** 信号表是这个仓库里注释最密的一段——
+    「这个词为什么是负的」「这条为什么砍到 -14」全写在每条信号旁边，
+    而配置页上最常按的就是这里的保存。整段重写一次就把那些理由全抹了，
+    下次再调权重的人只能看见一堆没有出处的数字。
+
+    信号按 ``name`` 对齐：名字还在就只改变了的那几行（它上面那段说明原样留着），
+    名字没了就删掉整块，新名字追加到最后一块之后。改名等于删一条加一条，
+    那条的注释跟着没——这是按名字对齐必然的代价，比整段全丢小得多。
     """
     lines = _read_lines(profile_file)
-    return _write_lines(profile_file, _replace_section(lines, "score", _render_score(score)))
+    if not _section_spans(lines, "score"):
+        return _write_lines(profile_file, [*lines, *_separator(lines), *_render_score(score)])
+
+    payload = score.model_dump()
+    payload.pop("signals", None)
+    desired = _flatten_tables("score", payload)
+    current = _flatten_tables("score", _section_payload(profile_file, "score", drop="signals"))
+    # drop_missing=False：``[[score.signals]]`` 不在 desired 里，但它不是「被删了」，
+    # 而是由下面那步自己管
+    lines = _patch_section(lines, "score", desired, current, drop_missing=False)
+    return _write_lines(profile_file, _patch_signals(lines, score.signals))
+
+
+def _section_payload(config_file: Path, section: str, drop: str) -> dict[str, Any]:
+    """文件里这一段现在解析出来的值，去掉 ``drop`` 那个键。"""
+    payload = read_section(config_file, section).model_dump()
+    payload.pop(drop, None)
+    return payload
+
+
+def _patch_signals(lines: list[str], signals: Sequence[Signal]) -> list[str]:
+    """按 ``name`` 对齐地改写 ``[[score.signals]]`` 各块。"""
+    blocks = _signal_blocks(lines)
+    wanted = {signal.name: signal for signal in signals}
+    seen: set[str] = set()
+    out: list[str] = []
+    cursor = 0
+    tail = 0
+
+    for start, end, parsed in blocks:
+        out += lines[cursor:start]
+        cursor = end
+        name = str(parsed.get("name", ""))
+        signal = wanted.get(name)
+        if signal is None:
+            # 这条被删了，整块不要（块**上面**那段说明是写给它的，跟着走）。
+            # 但块末尾那些紧贴下一个表头的注释是写给下一段的，得留下
+            out += lines[_trim_tail(lines, start, end) : end]
+            tail = len(out)
+            continue
+        seen.add(name)
+        body_end = _trim_tail(lines, start, end)
+        values = {"weight": _toml_num(signal.weight), "pattern": _toml_str(signal.pattern)}
+        kept = [lines[start]]
+        written: set[str] = set()
+        index = start + 1
+        while index < body_end:
+            span = _assignment_span(lines, index, body_end)
+            if span is None:
+                kept.append(lines[index])
+                index += 1
+                continue
+            key, stop = span
+            if key in values and _toml_scalar(parsed.get(key)) != values[key]:
+                kept.append(_replace_value(lines[index], values[key]))
+                kept += lines[index + 1 : stop]
+            else:
+                kept += lines[index:stop]
+            written.add(key)
+            index = stop
+        kept += [f"{key} = {value}\n" for key, value in values.items() if key not in written]
+        out += kept
+        out += lines[body_end:end]
+        tail = len(out)
+
+    out += lines[cursor:]
+    added = [signal for signal in signals if signal.name not in seen]
+    if added:
+        block: list[str] = []
+        for signal in added:
+            block += [
+                "\n[[score.signals]]\n",
+                f"name = {_toml_str(signal.name)}\n",
+                f"weight = {_toml_num(signal.weight)}\n",
+                f"pattern = {_toml_str(signal.pattern)}\n",
+            ]
+        at = tail
+        if not at:
+            # 一条都没留下：放在 [score] 名下最后一张表之后，
+            # 而不是文件末尾——追到 [search] 后面虽然也能解析，但没人看得懂
+            spans = _section_spans(out, "score")
+            at = spans[-1][1] if spans else len(out)
+        out = [*out[:at], *block, *out[at:]]
+    return out
+
+
+def _signal_blocks(lines: list[str]) -> list[tuple[int, int, dict[str, Any]]]:
+    """每个 ``[[score.signals]]`` 块的行区间与解析出来的值，按文件顺序。
+
+    块体本身就是合法 TOML，交给 ``tomllib`` 解析——自己认 ``name = '...'``
+    那一行等于再写一遍 TOML 的字符串规则，引号、转义、多行迟早对不上。
+    """
+    blocks: list[tuple[int, int, dict[str, Any]]] = []
+    start: int | None = None
+    for index, line in enumerate([*lines, "[\x00]\n"]):
+        name = _header_name(line)
+        if name is None:
+            continue
+        if start is not None:
+            body = "".join(lines[start + 1 : _trim_tail(lines, start, index)])
+            try:
+                blocks.append((start, index, tomllib.loads(body)))
+            except tomllib.TOMLDecodeError:
+                blocks.append((start, index, {}))
+            start = None
+        if line.strip().startswith("[[") and name == "score.signals":
+            start = index
+    return blocks
+
+
+def _toml_scalar(value: Any) -> str | None:
+    """文件里现在那个值渲染成 TOML 的样子，用来和新值比「变没变」。"""
+    return None if value is None else _toml_value(value)
 
 
 def write_prompt(path: Path, content: str) -> Path | None:
@@ -217,25 +401,24 @@ def write_section(config_file: Path, section: str, data: BaseModel | Mapping[str
 
 
 def write_search(profile_file: Path, search: SearchConfig) -> Path:
-    """整段重写 ``[search]``，但 ``keywords`` 数组里注释掉的候选词原样留着。
+    """改写 ``[search]``：标量按键定点替换，``keywords`` 数组单独写。
 
-    通用的 :func:`write_section` 做不到这一点：它只认值，不认注释。
-    而那些注释掉的词是「库里存量数据是怎么来的」的唯一线索，丢了就查不出
-    某一批职位当初是搜哪个词搜来的。
+    两件事分开做，是因为它们要保住的东西不一样：段内每个字段旁边那句说明
+    靠按键替换保住，数组里**注释掉的候选词**靠 :func:`write_keywords` 保住
+    （那些是「库里存量数据是怎么来的」的唯一线索）。
     """
-    lines = _read_lines(profile_file)
-    kept: list[str] = []
-    span = _section_span(lines, "search")
-    if span is not None:
-        array = _array_span(lines, span[0] + 1, span[1], "keywords")
-        if array is not None:
-            kept = _comment_lines(lines[array[0] + 1 : array[1] - 1])
-
     payload = search.model_dump()
     keywords = payload.pop("keywords", [])
-    # SearchConfig 没有子表，所以关键词数组直接接在标量后面就还在 [search] 段里
-    block = [*_render_table("search", payload), *_render_keywords(keywords, kept)]
-    return _write_lines(profile_file, _replace_section(lines, "search", block))
+    lines = _read_lines(profile_file)
+    if not _section_spans(lines, "search"):
+        block = [*_render_table("search", payload), *_render_keywords(keywords, [])]
+        _write_lines(profile_file, [*lines, *_separator(lines), *block])
+        return profile_file
+
+    desired = _flatten_tables("search", payload)
+    current = _flatten_tables("search", _section_payload(profile_file, "search", drop="keywords"))
+    _write_lines(profile_file, _patch_section(lines, "search", desired, current))
+    return write_keywords(profile_file, keywords)
 
 
 def write_raw(config_file: Path, scope: ConfigScope, text: str, root: Path | None = None) -> Path:
@@ -484,6 +667,7 @@ def _patch_section(
     section: str,
     desired: dict[str, dict[str, str]],
     current: dict[str, dict[str, str]],
+    drop_missing: bool = True,
 ) -> list[str]:
     """按键就地改 ``[section]``：**只动真正变了的那几行**，别的一个字节不碰。
 
@@ -497,6 +681,9 @@ def _patch_section(
 
     值变了就替换（行尾注释留着），变成 ``None`` 就删掉那一行，
     文件里还没有的键补在表末尾，整张表没了就删整张表。
+
+    ``drop_missing=False`` 时不认识的表原样留着——``[[score.signals]]``
+    由 :func:`_patch_signals` 自己管，不该被当成「被删了」。
     """
     regions = _table_regions(lines, section)
     out: list[str] = []
@@ -507,7 +694,12 @@ def _patch_section(
         out += lines[cursor:start]
         cursor = end
         if table not in desired:
-            insert_at = len(out)  # 整张表被删了（比如删掉一个猎聘账号）
+            if drop_missing:
+                insert_at = len(out)  # 整张表被删了（比如删掉一个猎聘账号）
+            else:
+                # 调用方自己管这张表（``[[score.signals]]``），原样留着
+                out += lines[start:end]
+                insert_at = len(out)
             continue
         want = desired[table]
         have = current.get(table, {})
@@ -593,11 +785,19 @@ def _assignment_span(lines: list[str], index: int, end: int) -> tuple[str, int] 
 
 
 def _replace_value(line: str, value: str) -> str:
-    """把一行赋值的值换掉，缩进、键名与行尾注释原样留着。"""
+    """把一行赋值的值换掉；缩进、键名、行尾注释与它所在的列都原样留着。
+
+    对齐也要保：这些文件是手写手维护的，几十行注释在同一列上排成一竖排，
+    改一个值就让其中一行错开，下次有人会顺手把整段重排一遍。
+    """
     code, comment = _split_comment(line)
     key, _, _ = code.partition("=")
-    tail = f"  {comment}" if comment else ""
-    return f"{key.rstrip()} = {value}{tail}\n"
+    head = f"{key.rstrip()} = {value}"
+    if not comment:
+        return f"{head}\n"
+    # 注释原来在第几列就还放第几列；新值太长挤不下就退回两个空格
+    padding = max(len(code) - len(head), 2)
+    return f"{head}{' ' * padding}{comment}\n"
 
 
 def _split_comment(line: str) -> tuple[str, str]:

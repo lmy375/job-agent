@@ -217,8 +217,8 @@ export interface ConfigPaths {
  * 刻意不照抄整个 `Settings`：那是几十个字段的树，抄一份在这里等于把配置表
  * 写两份，加个字段就会对不上。要多读一项就在这里加一项。
  *
- * 密钥字段在后端是 `Secret`（`SecretStr | None`），序列化后是 `"**********"`
- * 或 `null`——所以这里只能判断「配了没配」，拿不到明文。
+ * 密钥字段给的是**明文**：本机单人用，能打开这个页面就能 cat 配置文件，
+ * 打码只会让人没法在页面上填 token。
  */
 export interface AppSettings {
   profile: { account: string };
@@ -233,8 +233,64 @@ export interface AppSettings {
     accounts: Record<string, { user_token: string | null }>;
     rate_limit_per_min: number;
   };
+  /** 模型接入点。配置页的 provider 下拉列的就是这张表的 key */
+  agent: { provider: string; providers: Record<string, { model: string }> };
   score: ScoreSettings;
   llm_score: { provider: string | null; concurrency: number };
+}
+
+// ---- 配置的读写（页面上能改的就是全部配置项）
+
+/** 一个段住哪个文件。两个文件的段名完全不重叠，所以段名能唯一定位到文件。 */
+export type ConfigScope = "global" | "profile";
+
+/**
+ * `GET /api/config/sections` 里的一段。
+ *
+ * `values` 是**文件里**那份（不是生效的配置树）：相对路径还是相对路径，
+ * 原样发回去保存才不会被换成某台机器上的绝对路径。
+ *
+ * 它是唯一一个 `unknown` 值的接口——十来个段是十来个不同的模型，
+ * 在这里抄一份联合类型等于把配置树抄第二遍。字段名由 `fields.tsx` 里的
+ * 表单描述给出，后端 `extra="forbid"` 会挡下拼错的那个。
+ */
+export interface SectionView {
+  name: string;
+  scope: ConfigScope;
+  /** 这一段写回哪个文件，绝对路径 */
+  file: string;
+  values: Record<string, unknown>;
+}
+
+export interface SectionsResponse {
+  sections: SectionView[];
+}
+
+/** 一个配置文件的原文（「高级」页的文本编辑器）。**含密钥明文、含全部注释**。 */
+export interface ConfigFileView {
+  scope: ConfigScope;
+  path: string;
+  text: string;
+  /** 文件不存在也返回（`text` 为空）——profile.toml 缺失是合法状态 */
+  exists: boolean;
+}
+
+export interface ConfigFilesResponse {
+  files: ConfigFileView[];
+}
+
+/** profile 目录下的自由 Markdown。 */
+export type DocKind = "resume" | "preferences";
+
+export interface DocView {
+  kind: DocKind;
+  path: string;
+  content: string;
+  exists: boolean;
+}
+
+export interface DocsResponse {
+  docs: DocView[];
 }
 
 /** `[score]` 里的一条信号：命中就加 `weight`，负权重即减分项。 */
@@ -247,11 +303,10 @@ export interface ScoreSignal {
 /**
  * `config/models.py` 的 `ScoreConfig`：打分门槛 + 匹配信号表。
  *
- * 既是 `/api/config` 里读到的那一段，也是 `PUT /api/config/score` 的**请求体**
- * ——后端那边请求体就是 `ScoreConfig` 本身（`ScoreUpdate` 直接继承它），
- * 所以这里一个类型管两个方向，字段表只有一份。
+ * 既是 `/api/config` 里读到的那一段，也是 `PUT /api/config/sections/score`
+ * 的请求体内容，所以一个类型管两个方向，字段表只有一份。
  *
- * 后端是 `extra="forbid"`：多发一个字段会 422，字段名必须一字不差。
+ * 后端是 `extra="forbid"`：多发一个字段会被拒，字段名必须一字不差。
  */
 export interface ScoreSettings {
   /** 万元/年，税前；null = 不按薪资过滤 */

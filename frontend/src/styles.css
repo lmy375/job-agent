@@ -323,10 +323,25 @@ table.kv th { text-align: left; color: var(--muted); font-weight: 500; width: 14
 
 /* ---------------------------------------------------------------- 配置编辑 */
 
-.editor-row { display: flex; gap: 14px; flex-wrap: wrap; }
-.editor-row label { flex: 1 1 200px; margin-bottom: 12px; }
-.editor-row label.grow { flex: 4 1 320px; }
-.editor-row label.narrow { flex: 0 1 180px; }
+/* 字段表用网格而不是 flex：字段下面那句解释长短不一，flex 会让同一行的
+   输入框错开高度，扫一眼看不出哪几个是一组。网格里每格等宽、顶对齐。 */
+.editor-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 4px 16px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+.editor-row label { margin-bottom: 12px; }
+/* 长正则、UA、token 这类占满整行——截断了就看不出写的是什么 */
+.editor-row label.grow-full { grid-column: 1 / -1; }
+/* 占两格，把第三格留给紧跟着它的那个字段：「硬性要求关键词 + 不匹配时扣分」
+   是一件事的两半，拆成两行读的人会以为它们没关系。
+   刻意不用 `1 / -2`：auto-fit 的轨道数是事后算的，负数行号在这里对不准。 */
+.editor-row label.grow-rest { grid-column: span 2; }
+/* 下拉默认是 inline-block，会缩成内容那么宽、还跟标签挤在一行；
+   拉满格宽之后它和输入框对得上 */
+.editor-row select { display: block; width: 100%; margin-top: 4px; }
 .form-actions {
   display: flex;
   align-items: center;
@@ -505,3 +520,42 @@ ul.plain li { margin: 4px 0; }
   margin: 8px 0 0;
   font: 12.5px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
 }
+
+/* ---------------------------------------------- 配置页的子 tab 与表单字段 */
+
+.subtabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 14px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+.subtab {
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  padding: 5px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.subtab:hover { background: var(--panel); color: var(--text); }
+.subtab.active { background: var(--accent-soft); color: var(--accent); border-color: var(--border); }
+/* profile 名靠右：这一页每次保存都在写某个具体 profile 的文件，得一直看得见 */
+.subtab-note { margin-left: auto; }
+
+/* 段名跟在标题后面，小一号：它是给「去文件里找这一段」用的线索，不是标题本身 */
+.section-tag { font-size: 12px; font-weight: normal; color: var(--muted); }
+
+/* 字段下面那句解释。压得比标签轻，扫一眼标题时不会被它打断 */
+.field-hint {
+  display: block;
+  margin-top: 3px;
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.file-path { margin: -4px 0 8px; font-size: 12px; }

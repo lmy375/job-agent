@@ -397,3 +397,95 @@ def test_secret_is_masked_unless_asked(tmp_path) -> None:
     assert account.model_dump(mode="json", context={REVEAL_SECRETS: True})["user_token"] == (
         "tok-secret"
     )
+
+
+# ---------------------------------------------- 注释是用户唯一的说明书
+#
+# 配置页上最常按的就是「保存」。每按一次就把段内注释重排一遍的话，
+# 「这个词为什么是负的」「这条为什么砍到 -14」很快就全没了。
+
+
+def test_saving_score_unchanged_touches_nothing(tmp_path) -> None:
+    path = template_copy(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    score = read_section(path, "score")
+    assert isinstance(score, ScoreConfig)
+
+    write_score(path, score)
+
+    assert path.read_text(encoding="utf-8") == before
+
+
+def test_changing_one_signal_keeps_every_other_line(tmp_path) -> None:
+    """改一条信号的权重只动那一行，它上面那段说明留在原处。"""
+    path = template_copy(tmp_path)
+    before = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    comments = sum(1 for line in before if line.strip().startswith("#"))
+
+    score = read_section(path, "score")
+    target = score.signals[0].name
+    score.signals[0].weight = 99
+    write_score(path, score)
+
+    after = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    assert [line for line in after if line not in before] == ["weight = 99\n"]
+    assert sum(1 for line in after if line.strip().startswith("#")) == comments
+    assert parse(path).score.signals[0].name == target
+
+
+def test_removing_a_signal_drops_its_block_and_keeps_the_next_section(tmp_path) -> None:
+    path = template_copy(tmp_path)
+    score = read_section(path, "score")
+    dropped = score.signals[0].name
+    kept = [signal.name for signal in score.signals[1:]]
+    score.signals = score.signals[1:]
+
+    write_score(path, score)
+
+    parsed = parse(path)
+    assert [signal.name for signal in parsed.score.signals] == kept
+    assert dropped not in path.read_text(encoding="utf-8")
+
+
+def test_keywords_keep_their_grouping_comments(tmp_path) -> None:
+    """数组里的注释是**分组说明**，被冲到末尾就看不出它说的是哪几个词了。"""
+    path = template_copy(tmp_path)
+    keywords = parse(path).search.keywords
+    before = path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    # 加一个、删一个，留下来的词顺序不变
+    write_keywords(path, [*keywords[1:], "新词"])
+
+    after = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    assert parse(path).search.keywords == [*keywords[1:], "新词"]
+    # 原来的注释一行没动（位置也没动）
+    assert [line for line in before if line.strip().startswith("#")] == [
+        line for line in after if line.strip().startswith("#")
+    ]
+    assert [line for line in after if line not in before] == ["  '新词',\n"]
+
+
+def test_reordering_keywords_falls_back_to_a_full_rewrite(tmp_path) -> None:
+    """顺序就是优先级，真换了顺序只能重排——代价是分组注释归到数组末尾。"""
+    path = template_copy(tmp_path)
+    keywords = parse(path).search.keywords
+
+    write_keywords(path, list(reversed(keywords)))
+
+    assert parse(path).search.keywords == list(reversed(keywords))
+    # 注释掉的候选词仍然留着（那是「存量数据怎么来的」的线索）
+    assert "区块链" in path.read_text(encoding="utf-8")
+
+
+def test_changed_value_keeps_the_trailing_comment_in_its_column(tmp_path) -> None:
+    """几十行注释排成一竖排，改一个值让其中一行错开，下次就有人把整段重排。"""
+    path = tmp_path / "profile.toml"
+    path.write_text('[search]\naddress = "北京"        # 工作地点\nmax_pages = 2\n', encoding="utf-8")
+
+    search = read_section(path, "search")
+    search.address = "上海"
+    write_search(path, search)
+
+    text = path.read_text(encoding="utf-8")
+    line = next(row for row in text.splitlines() if "address" in row)
+    assert line.index("#") == len('address = "北京"        ')
