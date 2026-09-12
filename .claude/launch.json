@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "api",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "job", "web", "--skip-build", "--no-browser", "--port", "18000"],
+      "port": 18000
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "frontend", "dev", "--port", "5174", "--strictPort"],
+      "port": 5174
+    }
+  ]
+}

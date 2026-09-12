@@ -124,6 +124,7 @@ input:focus, select:focus, textarea:focus {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn.small { padding: 3px 9px; font-size: 12.5px; }
 .btn.ghost { background: none; color: var(--accent); border-color: var(--border); }
+.btn.ghost.active { background: var(--accent-soft); border-color: var(--accent); }
 .link {
   background: none;
   border: none;
@@ -180,7 +181,6 @@ input:focus, select:focus, textarea:focus {
 
 /* ---------------------------------------------------------------- 表格 */
 
-.list-meta { margin: 0 0 8px; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 
 .table-wrap {
   background: var(--panel);
@@ -209,8 +209,11 @@ thead th.sorted { color: var(--accent); }
 thead th .arrow { margin-left: 4px; font-size: 11px; }
 
 tbody td { padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+tbody tr.clickable { cursor: pointer; }
 tbody tr:hover { background: var(--accent-soft); }
 tbody tr.selected { background: var(--accent-soft); }
+/* 抽屉里正在看的那一行：左侧一道色条，关掉抽屉再回来还能找到它 */
+tbody tr.active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
 .job-name { max-width: 380px; font-weight: 500; }
 .salary { color: var(--salary); white-space: nowrap; }
 /* 名次与分数：等宽右对齐，扫一眼就能比大小 */
@@ -229,17 +232,6 @@ tbody tr.off-track td.score, tbody tr.off-track .job-name { opacity: 0.55; }
 .msg { max-width: 460px; color: var(--muted); }
 table.kv th { text-align: left; color: var(--muted); font-weight: 500; width: 140px; white-space: nowrap; }
 
-.detail-row td { background: var(--bg); }
-.jd pre {
-  white-space: pre-wrap;
-  background: var(--code-bg);
-  border-radius: 8px;
-  padding: 12px 14px;
-  max-height: 420px;
-  overflow: auto;
-  margin: 8px 0 0;
-  font: 12.5px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace;
-}
 .jd-meta { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
 
 /* ---------------------------------------------------------------- 面板 */
@@ -338,34 +330,166 @@ table.signals tbody tr:hover { background: none; }
 table.signals .w-name { width: 220px; }
 table.signals .w-weight { width: 88px; }
 
-/* ------------------------------------------------------- 批量选择 / LLM 打分 */
+/* ------------------------------------------------------- 操作区 / 批量选择 */
 
-/* 勾选列尽量窄：它只是个入口，不该在几十条职位里抢视线 */
+/* 顶部操作区：会改库、会花钱的动作都在这一排，和下面的筛选条件分开 */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.toolbar-group { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.toolbar-meta { margin-left: auto; color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.toolbar-meta b { color: var(--text); }
+.divider { width: 1px; height: 18px; background: var(--border); margin: 0 4px; }
+
+/* 勾选列尽量窄：它只是个入口，而且只在批量模式下才出现 */
 th.pick, td.pick { width: 28px; text-align: center; padding-left: 10px; padding-right: 0; }
 th.pick input, td.pick input { width: auto; margin: 0; cursor: pointer; }
 
-/* 批量操作条贴在列表上方：勾了多少、要花多少钱，得和表格在同一屏里 */
+/* 批量操作条紧贴操作区下方：勾了多少、要花多少钱，得和表格在同一屏里 */
 .bulkbar {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin: 0 0 10px;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--panel);
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-soft);
   font-size: 12.5px;
 }
 .bulkbar .btn { margin-right: 0; }
+.bulkbar b { color: var(--text); }
 
-/* 展开行里的两维裁决：分数在上、依据分两组列出来 */
-.llm-verdict { margin-bottom: 10px; }
 .reasons { margin-top: 6px; font-size: 12.5px; }
 .reasons-title { color: var(--muted); }
 .reasons ul { margin: 2px 0 0; padding-left: 20px; }
 .reasons li { margin: 1px 0; }
+/* 带正负号的依据自己就是标记，不再叠一个圆点 */
+.reasons ul.signed { list-style: none; padding-left: 4px; }
+.reasons .sign { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .prompt-editor { margin-bottom: 16px; }
 .prompt-editor label > span { display: flex; align-items: center; gap: 6px; }
 .prompt-editor p { margin: 4px 0 0; }
+
+/* ---------------------------------------------------------------- 抽屉 */
+
+/* 右侧抽屉：点一行拉出来看细节与评估。覆盖在列表之上，列表自身不动 */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 21, 0.28);
+  z-index: 20;
+}
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(640px, 92vw);
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.12);
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  animation: drawer-in 0.18s ease-out;
+}
+@keyframes drawer-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+.drawer-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-title { flex: 1; min-width: 0; }
+.drawer-title h2 { margin: 0 0 4px; font-size: 17px; line-height: 1.35; letter-spacing: -0.01em; }
+.drawer-sub { display: flex; gap: 10px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.icon-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  flex: none;
+}
+.icon-btn:hover { background: var(--code-bg); color: var(--text); }
+.drawer-body { flex: 1; overflow: auto; padding: 16px 20px 32px; }
+
+.fact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+.fact-label { color: var(--muted); font-size: 12px; }
+.fact-value { font-size: 13.5px; margin-top: 1px; }
+.fact-value .salary { font-weight: 600; }
+.fact-value .sub { display: block; }
+.tags.wrap { flex-wrap: wrap; margin: 10px 0 0; }
+
+.drawer-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 16px 0 6px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.drawer-section { margin-top: 18px; }
+.drawer-section h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.drawer-section h3 .hint { font-weight: 400; font-size: 12px; opacity: 0.8; }
+.drawer-section p { margin: 0; font-size: 13px; }
+
+.score-line { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+.score-line .big { font-size: 26px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.score-line .badge { margin-left: 8px; }
+
+/* 两维裁决并排：分数大、维度名在下，依据列在各自框里——刻意不给一个合计 */
+.llm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+.llm-box { background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+.llm-num { font-size: 28px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.llm-num .denom { font-size: 13px; color: var(--muted); font-weight: 400; margin-left: 2px; }
+.llm-label { font-weight: 500; margin-top: 2px; }
+.llm-box .reasons { margin-top: 8px; }
+.llm-box .reasons ul { padding-left: 16px; }
+
+ul.plain { margin: 0; padding: 0; list-style: none; font-size: 13px; }
+ul.plain li { margin: 4px 0; }
+
+.jd-text {
+  white-space: pre-wrap;
+  background: var(--code-bg);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 8px 0 0;
+  font: 12.5px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+}
