@@ -14,18 +14,32 @@ import shutil
 import tomllib
 from pathlib import Path
 
+import pytest
+from pydantic import BaseModel
+
 from job_agent.config import (
+    REVEAL_SECRETS,
+    SECRET_MASK,
+    ConfigScope,
+    GlobalSettings,
     ProfileSettings,
     ScoreConfig,
+    config_sections,
     load_settings,
+    read_section,
     write_keywords,
     write_prompt,
+    write_raw,
     write_score,
+    write_search,
+    write_section,
 )
-from job_agent.config.models import RequireRule, Signal
+from job_agent.config.models import LiepinAccount, LiepinConfig, RequireRule, Signal
+from job_agent.errors import ConfigError
 
 REPO = Path(__file__).resolve().parents[1]
 TEMPLATE = REPO / "config" / "templates" / "profile.toml"
+EXAMPLE = REPO / "config" / "config.example.toml"
 
 
 def template_copy(tmp_path: Path) -> Path:
@@ -238,3 +252,148 @@ def test_write_prompt_is_a_full_replace(tmp_path):
     write_prompt(path, "第一版")
     write_prompt(path, "第二版")
     assert path.read_text(encoding="utf-8") == "第二版\n"
+
+
+# ------------------------------------------------------------ 任意段的写回
+#
+# Web 管理台能改**所有**配置项，所以写回不再只盯 profile.toml 的三样。
+# 这一组盯的仍然是破坏性：改一个值不许顺手把别的行重排掉。
+
+
+def global_copy(tmp_path: Path) -> Path:
+    target = tmp_path / "config.toml"
+    shutil.copyfile(EXAMPLE, target)
+    return target
+
+
+def test_config_sections_covers_both_files() -> None:
+    """段名表靠遍历模型得出：两个 Settings 上的每个配置段都得在里面，一个不漏。"""
+    sections = config_sections()
+    for model, scope in ((GlobalSettings, ConfigScope.GLOBAL), (ProfileSettings, ConfigScope.PROFILE)):
+        for name, field in model.model_fields.items():
+            annotation = field.annotation
+            if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+                assert sections[name].scope is scope
+                assert sections[name].model is annotation
+
+    # 两个文件的段名不重叠是硬约束，所以合成一张表不该丢人
+    overlap = set(GlobalSettings.model_fields) & set(ProfileSettings.model_fields)
+    assert not overlap
+
+
+@pytest.mark.parametrize("section", sorted(set(config_sections()) - {"search", "score"}))
+def test_rewriting_a_section_unchanged_is_a_no_op(tmp_path, section: str) -> None:
+    """原样保存一遍，文件必须**逐字节**不变。
+
+    值没变就不许动那一行——否则第一次打开配置页按保存，
+    引号风格、小数点、手工对齐的空格会被整份冲掉，diff 里全是噪音。
+    """
+    target = global_copy(tmp_path) if config_sections()[section].scope is ConfigScope.GLOBAL else template_copy(tmp_path)
+    before = target.read_text(encoding="utf-8")
+
+    write_section(target, section, read_section(target, section))
+
+    assert target.read_text(encoding="utf-8") == before
+
+
+def test_write_section_only_touches_changed_lines(tmp_path) -> None:
+    path = global_copy(tmp_path)
+    before = path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    liepin = read_section(path, "liepin")
+    assert isinstance(liepin, LiepinConfig)
+    liepin.rate_limit_per_min = 6
+    write_section(path, "liepin", liepin)
+
+    after = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    changed = [line for line in after if line not in before]
+    assert changed == ["rate_limit_per_min = 6\n"]
+    # 限速那句「调大有风险」的说明还在原处
+    assert "# 所以这里默认留足余量取 8。调大有风险。\n" in after
+
+
+def test_write_section_adds_and_removes_subtables(tmp_path) -> None:
+    """加一个猎聘账号就是加一张子表；删掉它就把整张表删干净，不留空壳。"""
+    path = global_copy(tmp_path)
+    liepin = read_section(path, "liepin")
+    liepin.accounts["partner"] = LiepinAccount(user_token="tok-partner")
+    write_section(path, "liepin", liepin)
+
+    text = path.read_text(encoding="utf-8")
+    assert "[liepin.accounts.partner]\n" in text
+    # 明文落盘：写的是配置文件本身，打码写进去等于把 token 弄丢
+    assert "tok-partner" in text
+    assert GlobalSettings(root=path.parent, **tomllib.loads(text)).liepin.accounts[
+        "partner"
+    ].user_token.get_secret_value() == "tok-partner"
+
+    liepin = read_section(path, "liepin")
+    del liepin.accounts["partner"]
+    write_section(path, "liepin", liepin)
+    assert "partner" not in path.read_text(encoding="utf-8").replace(
+        "# [liepin.accounts.partner]", ""
+    ).replace("# user_token", "")
+
+
+def test_write_section_handles_discontiguous_subtables(tmp_path) -> None:
+    """``[agent.langsmith]`` 在 example 里排在 ``[llm_score]`` 之后。
+
+    只认第一段会把它漏在原地，重写之后同一张表声明两次，
+    文件直接变成读不出来的 TOML——而且要等下次启动才发现。
+    """
+    path = global_copy(tmp_path)
+    assert path.read_text(encoding="utf-8").index("[agent.langsmith]") > path.read_text(
+        encoding="utf-8"
+    ).index("[llm_score]")
+
+    agent = read_section(path, "agent")
+    agent.top_n = 12
+    write_section(path, "agent", agent)
+
+    text = path.read_text(encoding="utf-8")
+    assert text.count("[agent.langsmith]\n") == 1
+    assert GlobalSettings(root=path.parent, **tomllib.loads(text)).agent.top_n == 12
+
+
+def test_write_search_keeps_commented_out_candidates(tmp_path) -> None:
+    """整段重写 ``[search]`` 也不许弄丢注释掉的候选词。"""
+    path = template_copy(tmp_path)
+    search = read_section(path, "search")
+    search.max_pages = 3
+    write_search(path, search)
+
+    parsed = parse(path)
+    assert parsed.search.max_pages == 3
+    assert parsed.search.keywords == parse(TEMPLATE).search.keywords
+    commented = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip().startswith("#") and "," in line
+    ]
+    assert commented
+
+
+def test_write_raw_rejects_bad_content_without_touching_the_file(tmp_path) -> None:
+    """坏内容一个字节都不许落盘：下一个读它的可能是明早无人值守的 job agent。"""
+    path = template_copy(tmp_path)
+    before = path.read_text(encoding="utf-8")
+
+    with pytest.raises(ConfigError, match="不是合法 TOML"):
+        write_raw(path, ConfigScope.PROFILE, "[search\nkeywords = ")
+    assert path.read_text(encoding="utf-8") == before
+
+    with pytest.raises(ConfigError, match="校验不过"):
+        write_raw(path, ConfigScope.PROFILE, "[search]\nmax_pages = 99\n")
+    assert path.read_text(encoding="utf-8") == before
+
+    write_raw(path, ConfigScope.PROFILE, "[search]\nmax_pages = 2\n")
+    assert parse(path).search.max_pages == 2
+
+
+def test_secret_is_masked_unless_asked(tmp_path) -> None:
+    """明文是个要主动写出来的动作：默认序列化仍然打码，顺手打日志漏不了。"""
+    account = LiepinAccount(user_token="tok-secret")
+    assert account.model_dump(mode="json")["user_token"] == SECRET_MASK
+    assert account.model_dump(mode="json", context={REVEAL_SECRETS: True})["user_token"] == (
+        "tok-secret"
+    )

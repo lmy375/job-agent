@@ -36,7 +36,9 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    PlainSerializer,
     SecretStr,
+    SerializationInfo,
     field_validator,
     model_validator,
 )
@@ -63,10 +65,41 @@ def _clean_secret(value: Any) -> Any:
     return value
 
 
-#: 密钥字段。``SecretStr`` 在 ``model_dump(mode="json")`` 里自动变成
-#: ``**********``，所以 ``job config show --json`` 与 Web 的 ``/api/config``
-#: 天然不会漏密钥——新增一个密钥字段不需要再去别处补脱敏逻辑。
-Secret = Annotated[SecretStr | None, BeforeValidator(_clean_secret)]
+#: 打码后的样子。与 ``SecretStr`` 原本的 ``str()`` 一致。
+SECRET_MASK = "**********"
+
+#: 序列化上下文里的开关名：``model_dump(mode="json", context={REVEAL_SECRETS: True})``
+#: 才吐明文。见 :func:`_dump_secret`。
+REVEAL_SECRETS = "reveal_secrets"
+
+
+def _dump_secret(value: SecretStr | None, info: SerializationInfo) -> str | None:
+    """默认打码，只有调用方**显式**要求才给明文。
+
+    默认这一侧堵住了所有「顺手序列化」的出口：日志、``job config show --json``、
+    出错时打印整棵配置树——这些地方谁也不会记得单独脱敏，所以默认值必须是安全的那个。
+
+    明文是个要主动写出来的动作，全仓库只有 Web 配置页这么做
+    （:func:`job_agent.web.routers.config.get_config`）。那里本来就是填 token 的地方，
+    而能打开那个页面的人本来就能 ``cat config/config.toml``：
+    服务只监听本机、单人使用，「看得到网页」与「看得到文件」是同一份权限。
+    """
+    if value is None:
+        return None
+    if info.context and info.context.get(REVEAL_SECRETS):
+        return value.get_secret_value()
+    return SECRET_MASK
+
+
+#: 密钥字段。序列化成 JSON 时默认变 :data:`SECRET_MASK`，
+#: 新增一个密钥字段不需要再去别处补脱敏逻辑。
+Secret = Annotated[
+    SecretStr | None,
+    BeforeValidator(_clean_secret),
+    # 只挂 json 模式：``model_dump()``（python 模式）仍然吐 ``SecretStr`` 对象，
+    # 写回 TOML 的那一侧靠类型认出它、取明文落盘
+    PlainSerializer(_dump_secret, return_type=str | None, when_used="json"),
+]
 
 
 class ProfilesConfig(_Model):
@@ -105,7 +138,11 @@ class ProfileConfig(_Model):
 class SearchConfig(_Model):
     """搜索条件。字段留空即不按该维度过滤。"""
 
-    address: str | None = "北京"
+    #: 工作地点。默认 ``None`` = 不按地点过滤：一个具体城市是**取向**，
+    #: 属于 profile（模板里填着北京），写进 ``src/`` 就成了上海人的默认值。
+    #: 还有一层原因：TOML 没有 null，字段留空就等于「文件里没这一行」，
+    #: 默认值一旦非 None，页面上清空它保存后会被默认值悄悄顶回来。
+    address: str | None = None
     salary_kind: SalaryKind | None = None
     # 单位为「元」，按薪资区间**重叠**过滤（不是「下限 ≥ 该值」），
     # salaryKind=年薪 时把职位薪资年化后比较。数值过小（如 50）等同不过滤。
