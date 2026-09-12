@@ -117,7 +117,7 @@ export interface SalarySummary {
   avgHighWan: number;
 }
 
-/** 落库分数的新鲜度。概览靠它提醒「该重新打分了」。 */
+/** 落库分数的新鲜度。职位页顶部的库存卡靠它提醒「该重新打分了」。 */
 export interface ScoreStatus {
   scored: number;
   /** 有 JD、却还没打分的条数 */

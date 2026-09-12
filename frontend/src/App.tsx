@@ -2,16 +2,14 @@ import { useEffect, useState } from "react";
 import { api, errorMessage } from "./api";
 import JobsView from "./components/JobsView";
 import TasksView from "./components/TasksView";
-import OverviewView from "./components/OverviewView";
 import ConfigView from "./components/ConfigView";
 import type { ConfigPaths, HealthResponse } from "./types";
 
-type TabKey = "jobs" | "tasks" | "overview" | "config";
+type TabKey = "jobs" | "tasks" | "config";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "jobs", label: "职位" },
   { key: "tasks", label: "采集任务" },
-  { key: "overview", label: "数据概览" },
   { key: "config", label: "配置" },
 ];
 
@@ -70,7 +68,6 @@ export default function App() {
       {/* 提交 LLM 打分后自动切到任务页：任务在后台跑，进度和日志都在那边 */}
       {tab === "jobs" && <JobsView onTaskCreated={() => setTab("tasks")} />}
       {tab === "tasks" && <TasksView />}
-      {tab === "overview" && <OverviewView />}
       {tab === "config" && <ConfigView />}
     </div>
   );

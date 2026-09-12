@@ -282,22 +282,32 @@ table.kv th { text-align: left; color: var(--muted); font-weight: 500; width: 14
 
 /* ---------------------------------------------------------------- 指标卡 */
 
-.stat-grid {
+/* 职位页顶部的库存一览：一排紧凑的小卡，只报数不做分析。过期提醒用 warn 色 */
+.stats-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-  gap: 12px;
-  margin: 18px 0;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 14px 0 0;
 }
 .stat {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
-  padding: 14px 16px;
+  padding: 10px 14px;
+  min-width: 0;
 }
-.stat-v { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; }
-.stat-l { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
-.stat-n { color: var(--muted); font-size: 11.5px; margin-top: 4px; opacity: 0.85; }
-.stat-n.warn { color: var(--warn); }
+.stat-v { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.stat-l { color: var(--muted); font-size: 12px; margin-top: 1px; }
+.stat-n {
+  color: var(--muted);
+  font-size: 11.5px;
+  margin-top: 3px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stat-n.warn { color: var(--warn); opacity: 1; }
 
 /* ---------------------------------------------------------------- 职位来源 */
 

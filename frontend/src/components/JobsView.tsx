@@ -6,6 +6,7 @@ import { formatTime, jobKindLabel } from "../format";
 import type { JobBundle, JobListResponse, JobRow, KeywordCount, LlmScoreTaskResult } from "../types";
 import JobDrawer from "./JobDrawer";
 import RescoreButton from "./RescoreButton";
+import StatsStrip from "./StatsStrip";
 
 /**
  * 职位列表。
@@ -14,8 +15,9 @@ import RescoreButton from "./RescoreButton";
  * 一次全取回来，排序与翻找都在浏览器里做——点表头即时重排，不用等请求。
  * 后端只在「命中数超过兜底上限」时才截断，那种情况下面会明说。
  *
- * 页面分三层：顶部**操作区**（重新打分、LLM 打分、批量选择），中间筛选，
- * 下面表格。点一行在右侧拉出抽屉看细节与评估；批量模式下点一行是勾选。
+ * 页面自上而下：**库存一览**（原「数据概览」页并进来的几张卡）、**操作区**
+ * （重新打分、LLM 打分、批量选择）、筛选、表格。点一行在右侧拉出抽屉看细节与评估；
+ * 批量模式下点一行是勾选。
  */
 
 //: 可排序列的 key。写成联合类型而不是 string：排序状态里放了个不存在的列名，
@@ -114,6 +116,8 @@ export default function JobsView({ onTaskCreated }: { onTaskCreated?: () => void
   const [submitting, setSubmitting] = useState(false);
   //: 正在被单条打分的 jobId → 后台任务 id。行上的按钮据此显示「打分中」
   const [scoring, setScoring] = useState<Map<number, string>>(new Map());
+  //: 每次列表重新取数就 +1，顶部库存卡跟着刷新——打完分、投完递数字得同步
+  const [statsToken, setStatsToken] = useState(0);
 
   useEffect(() => {
     api.keywords().then((d) => setKeywords(d.keywords)).catch(() => {});
@@ -122,6 +126,7 @@ export default function JobsView({ onTaskCreated }: { onTaskCreated?: () => void
   const load = useCallback(() => {
     setLoading(true);
     setError("");
+    setStatsToken((n) => n + 1);
     const params: JobsQuery = { ...filters, order: FETCH_ORDER };
     api
       .jobs(params)
@@ -327,6 +332,8 @@ export default function JobsView({ onTaskCreated }: { onTaskCreated?: () => void
 
   return (
     <>
+      <StatsStrip refreshToken={statsToken} />
+
       {/* 操作区：会改库、会花钱的动作都在这一排，和筛选条件分开 */}
       <div className="toolbar">
         <div className="toolbar-group">
