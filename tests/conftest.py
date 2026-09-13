@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -110,9 +111,15 @@ def make_profile(root: Path, name: str = PROFILE, profile_toml: str = PROFILE_TO
 
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
-    """一个可用的项目根目录（全局 config/ + 一个名为 test 的 profile）。"""
+    """一个可用的项目根目录（全局 config/ + 一个名为 test 的 profile）。
+
+    连 ``config/templates/`` 也拷进来：新建 profile 就是把它整份拷一遍，
+    少了它「在页面上新建 profile」那条路根本跑不了。
+    """
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "config.toml").write_text(CONFIG_TOML, encoding="utf-8")
+    repo = Path(__file__).resolve().parents[1]
+    shutil.copytree(repo / "config" / "templates", tmp_path / "config" / "templates")
     make_profile(tmp_path)
     return tmp_path
 

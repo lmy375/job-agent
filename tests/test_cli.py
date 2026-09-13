@@ -12,6 +12,7 @@ from typer.testing import CliRunner
 
 from conftest import PROFILE, make_detail, make_job
 from job_agent.cli import app
+from job_agent.config import load_global_settings
 from job_agent.context import AppContext
 from job_agent.core.liepin.errors import LiepinRateLimited
 from job_agent.core.liepin.models import ApplyJobResult
@@ -112,8 +113,9 @@ def test_profile_new_copies_templates_and_sets_default(fresh_root):
     for name in ("profile.toml", "resume.md", "preferences.md"):
         assert (fresh_root / "profiles" / "me" / name).is_file(), name
     assert (fresh_root / "profiles" / "me" / "data").is_dir()
-    # 第一个 profile 自动成为默认，不带 --profile 也能跑
-    assert 'default = "me"' in (fresh_root / "config" / "config.toml").read_text(encoding="utf-8")
+    # 第一个 profile 自动成为默认，不带 --profile 也能跑。
+    # 比的是生效的值而不是那一行的文本——引号风格是写回层的事，不该钉在用例里
+    assert load_global_settings(fresh_root).profiles.default == "me"
     assert "me" in runner.invoke(app, ["config", "path"]).stdout
 
     # 已存在时不覆盖

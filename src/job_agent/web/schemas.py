@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
 
 from job_agent.config import ConfigPaths, ConfigScope, ScoreConfig, Settings
 from job_agent.core.liepin.enums import JobKind
+from job_agent.core.profile import ProfileSummary
 from job_agent.core.storage import (
     ApplicationRow,
     JobRow,
@@ -138,6 +139,37 @@ class ScoreUpdate(ScoreConfig):
     :class:`~job_agent.config.ScoreConfig` 上，请求体复用它，
     前端发来的那份就是能落盘的那份。
     """
+
+
+class ProfilesResponse(BaseModel):
+    """所有 profile 及各自的进度。
+
+    ``current`` 是**这个服务正在用的**那个，未必等于 ``[profiles].default``
+    （``job web -p web3`` 就不等）。界面上得分得清：切换会把两者一起改过去。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    profiles: list[ProfileSummary]
+    current: str
+    profilesDir: str
+
+
+class CreateProfileRequest(BaseModel):
+    """新建一个 profile。名字同时是目录名，字符集在内核里收紧过。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    #: 建完就切过去。默认是——刚建出来的那个多半就是接下来要用的
+    switch: bool = True
+
+
+class SwitchProfileRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+
 
 
 class SectionView(BaseModel):

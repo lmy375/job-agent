@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import make_detail, make_job
+from job_agent.config import load_global_settings
 from job_agent.context import AppContext
 from job_agent.core.liepin.errors import LiepinRateLimited
 from job_agent.core.liepin.models import ApplyJobResult
@@ -535,3 +536,65 @@ def _await_task(client, task_id: str, tries: int = 100) -> dict:
             return body
         time.sleep(0.02)
     raise AssertionError(f"任务 {task_id} 没在预期时间内结束")
+
+
+# ------------------------------------------------------------------ profile
+#
+# 换 profile 等于换一整套数据（库、简历、关键词、信号表），
+# 所以这几条盯的是「切完之后读写落在哪个库」。
+
+
+def test_profiles_list_reports_progress(client, seeded):
+    body = client.get("/api/profiles").json()
+    assert body["current"] == "test"
+    row = next(item for item in body["profiles"] if item["name"] == "test")
+    assert row["isCurrent"] is True and row["isDefault"] is True
+    assert row["jobs"] == 2 and row["hasResume"] is True
+    assert row["signals"] > 0
+
+
+def test_create_profile_switches_to_it(client, context, project_root):
+    """新建默认就切过去：刚建出来的那个多半就是接下来要用的。"""
+    body = client.post("/api/profiles", json={"name": "web3"}).json()
+
+    assert body["current"] == "web3"
+    assert (project_root / "profiles" / "web3" / "profile.toml").is_file()
+    # 切换 = 换掉整个 AppContext，而不只是改 settings：
+    # 仓储握的是库连接，只改设置不换连接就成了「设置说 A、读写落在 B」
+    fresh = client.get("/api/config").json()
+    assert fresh["paths"]["profile"] == "web3"
+    assert "profiles/web3" in fresh["paths"]["database"]
+    # 也写成了默认，下一条 job search 落在同一个库里
+    assert load_global_settings(project_root).profiles.default == "web3"
+
+
+def test_switching_profile_swaps_the_database(client, seeded, project_root):
+    assert client.get("/api/health").json()["jobs"] == 2
+
+    client.post("/api/profiles", json={"name": "other"})
+    assert client.get("/api/health").json()["jobs"] == 0  # 新库，空的
+
+    client.put("/api/profiles/current", json={"name": "test"})
+    assert client.get("/api/health").json()["jobs"] == 2  # 切回来，数据还在
+
+
+def test_switching_is_refused_while_a_task_runs(client, context, monkeypatch):
+    """后台任务在提交那一刻就捕获了当时的 AppContext，切换会把它脚下的连接抽走。"""
+    from job_agent.web.schemas import TaskKind, TaskParams
+
+    tasks = client.app.state.tasks
+    tasks.submit(TaskKind.SEARCH, lambda _task: None, TaskParams())
+    monkeypatch.setattr(type(tasks), "running", lambda _self: tasks.list()[0])
+
+    client.post("/api/profiles", json={"name": "later", "switch": False})
+    response = client.put("/api/profiles/current", json={"name": "later"})
+
+    assert response.status_code == 400
+    assert "不能切 profile" in response.json()["detail"]
+    assert context.settings.profile_name == "test"
+
+
+def test_switching_to_an_unknown_profile_changes_nothing(client, context):
+    response = client.put("/api/profiles/current", json={"name": "nope"})
+    assert response.status_code == 400
+    assert context.settings.profile_name == "test"

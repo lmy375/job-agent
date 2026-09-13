@@ -1,7 +1,14 @@
-"""``job web``：启动 Web 管理服务。"""
+"""``job web``：启动 Web 管理服务。
+
+**一条命令就该能用起来**：管理台是这个系统的完整入口，从填 token、配关键词
+到投递全在页面上。所以新克隆下来第一次跑 ``job web``，不该先被一句
+「还没有任何 profile」挡在门外，再去翻文档找该跑哪两条命令——
+缺全局配置就照模板生成一份，一个 profile 都没有就建一个 ``default``。
+"""
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import threading
 import webbrowser
@@ -10,7 +17,16 @@ from typing import Annotated
 
 import typer
 
-from job_agent.cli.state import CliState, echo_error, echo_warn
+from job_agent.cli.state import CliState, echo_error, echo_ok, echo_warn
+from job_agent.config import (
+    default_config_path,
+    example_config_path,
+    find_project_root,
+    list_profiles,
+    load_global_settings,
+    profiles_root,
+)
+from job_agent.core.profile import create_profile, set_default_profile
 from job_agent.log import get_logger
 
 logger = get_logger(__name__)
@@ -18,6 +34,8 @@ logger = get_logger(__name__)
 #: 前端源码目录（与 config/ 同级）
 FRONTEND_DIR_NAME = "frontend"
 BROWSER_DELAY = 1.0
+#: 一个 profile 都没有时自建的那个名字
+BOOTSTRAP_PROFILE = "default"
 
 
 def web(
@@ -33,6 +51,7 @@ def web(
 
     from job_agent.web import create_app
 
+    _bootstrap()
     state: CliState = ctx.obj
     context = state.context()
     settings = context.settings
@@ -53,6 +72,33 @@ def web(
         host=bind_host,
         port=bind_port,
         log_level=settings.logging.level.lower(),
+    )
+
+
+def _bootstrap() -> None:
+    """没有全局配置就生成一份，一个 profile 都没有就建一个。
+
+    自建是安全的：它只是把 ``config/`` 下的模板拷过去，里面全是待填的空壳，
+    **不含任何判断口径**——简历、求职偏好、关键词要填什么，仍然得人自己说。
+    刻意只在「一个都没有」时做：有两个及以上却没指定用哪个时绝不猜，
+    猜错就是往别人的库里写数据。
+    """
+    root = find_project_root()
+    target = default_config_path(root)
+    if not target.is_file() and example_config_path(root).is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(example_config_path(root), target)
+        echo_ok(f"已生成全局配置 {target}（猎聘 token 等会儿在页面上填）")
+
+    settings = load_global_settings(root)
+    if list_profiles(profiles_root(settings.root, settings)):
+        return
+    directory = create_profile(settings, BOOTSTRAP_PROFILE)
+    set_default_profile(settings, BOOTSTRAP_PROFILE)
+    echo_ok(f"还没有 profile，已建一个：{directory}")
+    typer.echo(
+        "  它现在是一份空模板。打开页面后先去「配置 → 提示词」把简历与求职偏好填了"
+        "，再到「职位采集」填 token 与关键词。"
     )
 
 

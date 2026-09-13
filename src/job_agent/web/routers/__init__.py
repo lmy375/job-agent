@@ -10,6 +10,7 @@ from job_agent.web.routers import (
     health,
     jobs,
     keywords,
+    profiles,
     scores,
     stats,
     tasks,
@@ -24,5 +25,6 @@ api_router.include_router(stats.router)
 api_router.include_router(tasks.router)
 api_router.include_router(applications.router)
 api_router.include_router(config.router)
+api_router.include_router(profiles.router)
 
 __all__ = ["api_router"]

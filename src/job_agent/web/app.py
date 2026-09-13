@@ -36,6 +36,7 @@ DESCRIPTION = """
 - `/api/config/files` 两个配置文件的原文；`PUT .../{global|profile}` 整份改
 - `/api/config/docs` 简历与求职偏好
 - `/api/config/prompts` LLM 打分两个维度的提示词（= `job llm-score` 用的那两段）
+- `/api/profiles` 所有 profile；`POST` 新建、`PUT /current` 切换（换一整套数据）
 - `/api/stats` 库内数据概览
 """
 

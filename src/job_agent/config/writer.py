@@ -704,13 +704,17 @@ def _patch_section(
         want = desired[table]
         have = current.get(table, {})
         body_end = _trim_tail(lines, start, end)
+        active = _active_keys(lines, start + 1, body_end)
         kept: list[str] = [lines[start]]
         written: set[str] = set()
         index = start + 1
         while index < body_end:
             span = _assignment_span(lines, index, body_end)
             if span is None:
-                kept.append(lines[index])
+                line, revived = _maybe_uncomment(lines[index], want, have, active | written)
+                kept.append(line)
+                if revived is not None:
+                    written.add(revived)
                 index += 1
                 continue
             key, stop = span
@@ -726,14 +730,23 @@ def _patch_section(
             index = stop
         # 文件里还没写、而且值确实和现在解析出来的不一样的键，补在表末尾。
         # 「和现在一样」的不补——那是默认值，写进去只会让文件长出一堆噪音
+        # 段尾那几行被 _trim_tail 划给了下一段，但注释掉的可选项常常正好在那儿
+        # （``[profiles]`` 的 ``# default = "default"``），所以也扫一遍
+        tail: list[str] = []
+        for line in lines[body_end:end]:
+            fixed, revived = _maybe_uncomment(line, want, have, active | written)
+            tail.append(fixed)
+            if revived is not None:
+                written.add(revived)
+
         kept += [
             f"{key} = {value}\n"
             for key, value in want.items()
             if key not in written and value != have.get(key)
         ]
         out += kept
-        out += lines[body_end:end]
-        insert_at = len(out) - (end - body_end)
+        out += tail
+        insert_at = len(out) - len(tail)
 
     out += lines[cursor:]
     # 文件里还没有的表（比如新加一个模型接入点），补在这一段最后一张表之后。
@@ -767,6 +780,51 @@ def _table_regions(lines: list[str], section: str) -> dict[str, tuple[int, int]]
         current = name if name == section or name.startswith(f"{section}.") else None
         start = index
     return regions
+
+
+def _active_keys(lines: list[str], start: int, end: int) -> set[str]:
+    """这张表里**已经生效**的键（注释掉的不算）。"""
+    keys: set[str] = set()
+    index = start
+    while index < end:
+        span = _assignment_span(lines, index, end)
+        if span is None:
+            index += 1
+            continue
+        key, index = span
+        keys.add(key)
+    return keys
+
+
+def _maybe_uncomment(
+    line: str, want: dict[str, str], have: dict[str, str], blocked: set[str]
+) -> tuple[str, str | None]:
+    """一行注释掉的赋值，该恢复就恢复；返回 ``(这一行, 恢复了哪个键)``。
+
+    模板里把可选项注释掉了（``# edu_level = "本科"``）。现在要写它，就**就地
+    取消注释**，而不是在段末另起一行——否则文件里会同时出现一行注释掉的和
+    一行生效的，谁在生效得猜。已经有生效赋值的键（``blocked``）不碰。
+    """
+    key = _commented_key(line)
+    if key is None or key in blocked or key not in want or want[key] == have.get(key):
+        return line, None
+    return _uncomment(line, want[key]), key
+
+
+def _commented_key(line: str) -> str | None:
+    """这一行是不是一条**被注释掉的**赋值；是就返回键名。"""
+    stripped = line.lstrip()
+    if not stripped.startswith("#"):
+        return None
+    code, _ = _split_comment(stripped.lstrip("#").lstrip())
+    match = re.match(r"\s*([A-Za-z0-9_.\-]+)\s*=\s*\S", code)
+    return match.group(1) if match else None
+
+
+def _uncomment(line: str, value: str) -> str:
+    """把一行注释掉的赋值恢复成生效的，缩进与行尾注释照旧。"""
+    indent = line[: len(line) - len(line.lstrip())]
+    return indent + _replace_value(line.lstrip().lstrip("#").lstrip(), value)
 
 
 def _assignment_span(lines: list[str], index: int, end: int) -> tuple[str, int] | None:

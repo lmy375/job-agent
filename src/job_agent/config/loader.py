@@ -146,6 +146,26 @@ def list_profiles(profiles_dir: Path) -> list[str]:
     )
 
 
+def load_global_settings(
+    root: Path | None = None, config_file: Path | None = None
+) -> GlobalSettings:
+    """只读全局那一半（``config/config.toml``），不定位 profile。
+
+    给「还没有任何 profile 时就得能跑」的场合用：``job profile new``、
+    ``job web`` 的自建、Web 上的 profile 列表与切换。
+    走 :func:`load_settings` 的话会因为定位不到 profile 直接报错。
+    """
+    resolved = (root or find_project_root()).resolve()
+    path = config_file or find_config_file(resolved)
+    raw = _read_toml(path) if path else {}
+    raw["root"] = resolved
+    raw["config_file"] = path
+    try:
+        return GlobalSettings(**raw)
+    except ValidationError as exc:
+        raise ConfigError(_format_validation_error(exc, path, *_BELONGS_TO_PROFILE)) from exc
+
+
 def resolve_profile(
     profile: str | None, settings: GlobalSettings, profiles_dir: Path
 ) -> tuple[str, Path]:
