@@ -559,3 +559,52 @@ ul.plain li { margin: 4px 0; }
 }
 
 .file-path { margin: -4px 0 8px; font-size: 12px; }
+
+/* ---------------------------------------------- 顶栏的 profile 切换 */
+
+.profile-menu { position: relative; }
+/* 标题旁边那颗 badge 本身就是按钮：换 profile 换的是整个界面的数据，
+   它是「现在在看谁」，不是一项藏在配置页里的设置 */
+button.badge.profile { cursor: pointer; font: inherit; font-size: 12px; }
+button.badge.profile:hover { border-color: var(--accent); color: var(--accent); }
+.caret { opacity: 0.55; }
+
+.profile-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  width: 320px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+}
+.profile-pop .muted { margin: 0 0 10px; line-height: 1.6; }
+.profile-pop .alert { margin: 0 0 10px; }
+
+.profile-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 9px;
+  margin-bottom: 2px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-row:hover:not(:disabled) { background: var(--panel); border-color: var(--border); }
+/* 当前那个不可点：点了也没事发生，但禁用态能说清「你就在这儿」 */
+.profile-row.current { background: var(--accent-soft); color: var(--accent); cursor: default; }
+.profile-row .muted { margin: 0; font-size: 12px; }
+.profile-name { font-weight: 500; }
+
+.profile-add { margin-top: 6px; }
+.profile-new { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 8px; }
+.profile-new input { flex: 1 1 150px; }
+.profile-new .muted { flex: 1 1 100%; margin: 2px 0 0; font-size: 12px; }

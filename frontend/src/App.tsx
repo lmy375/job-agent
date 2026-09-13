@@ -3,6 +3,7 @@ import { api, errorMessage } from "./api";
 import JobsView from "./components/JobsView";
 import TasksView from "./components/TasksView";
 import ConfigView from "./components/ConfigView";
+import ProfileMenu from "./components/ProfileMenu";
 import type { ConfigPaths, HealthResponse } from "./types";
 
 type TabKey = "jobs" | "tasks" | "config";
@@ -21,8 +22,8 @@ export default function App() {
 
   useEffect(() => {
     api.health().then(setHealth).catch((e: unknown) => setError(errorMessage(e)));
-    // 一次只服务一个 profile（job web -p <名字>）。顶栏必须显示是谁的数据：
-    // 几个 profile 的界面长得一模一样，看错了会把别人的岗位当成自己的
+    // 一次只服务一个 profile。顶栏必须显示是谁的数据：几个 profile 的界面
+    // 长得一模一样，看错了会把别人的岗位当成自己的。点它能切换或新建
     api.config().then((c) => setProfile(c.paths)).catch(() => {});
   }, []);
 
@@ -30,11 +31,7 @@ export default function App() {
     <div className="app">
       <header>
         <h1>job-agent</h1>
-        {profile && (
-          <span className="badge profile" title={profile.profileDir}>
-            {profile.profile}
-          </span>
-        )}
+        {profile && <ProfileMenu current={profile.profile} directory={profile.profileDir} />}
         <nav className="tabs">
           {TABS.map((t) => (
             <button

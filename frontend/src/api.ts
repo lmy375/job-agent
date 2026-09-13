@@ -23,6 +23,7 @@ import type {
   JobListResponse,
   KeywordsResponse,
   OverviewResponse,
+  ProfilesResponse,
   PromptsResponse,
   PromptsUpdate,
   ScoreRefreshResponse,
@@ -148,6 +149,29 @@ export const api = {
     request<ConfigResponse>(`/config/sections/${name}`, {
       method: "PUT",
       body: JSON.stringify({ values }),
+    }),
+  /** 所有 profile 及各自的进度（职位数、简历填了没、几条信号）。 */
+  profiles: () => request<ProfilesResponse>("/profiles"),
+  /**
+   * 新建一个 profile，默认建完就切过去。
+   *
+   * 新 profile 是一份空模板：没有简历、没有求职偏好、关键词是示例。
+   */
+  createProfile: (name: string, switchTo = true) =>
+    request<ProfilesResponse>("/profiles", {
+      method: "POST",
+      body: JSON.stringify({ name, switch: switchTo }),
+    }),
+  /**
+   * 切换当前 profile——**换一整套数据**：库、简历、关键词、信号表全换，
+   * 并写成 `[profiles].default`（下一条 `job search` 也落在同一个库里）。
+   *
+   * 有后台任务在跑时后端会拒绝：任务捕获的是切换前那个库连接。
+   */
+  switchProfile: (name: string) =>
+    request<ProfilesResponse>("/profiles/current", {
+      method: "PUT",
+      body: JSON.stringify({ name }),
     }),
   /** 两个配置文件的原文（「高级」页）。含密钥明文、含全部注释。 */
   configFiles: () => request<ConfigFilesResponse>("/config/files"),

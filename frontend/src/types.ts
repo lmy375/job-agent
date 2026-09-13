@@ -239,6 +239,35 @@ export interface AppSettings {
   llm_score: { provider: string | null; concurrency: number };
 }
 
+// ---- profile：一个人 / 一种求职场景
+
+/**
+ * `core/profile.py` 的 `ProfileSummary`：列表里的一行。
+ *
+ * 计数是 `null` 而不是 0：库还没建过与库里真的一条都没有要分得出来——
+ * 前者是「还没跑过采集」，后者是「跑了但没采到」。
+ */
+export interface ProfileSummary {
+  name: string;
+  directory: string;
+  /** `[profiles].default`：不带 --profile 时 CLI 用哪个 */
+  isDefault: boolean;
+  /** 这个服务正在用的那个。和 isDefault 未必相等（`job web -p web3`） */
+  isCurrent: boolean;
+  jobs: number | null;
+  applied: number | null;
+  hasResume: boolean;
+  hasPreferences: boolean;
+  /** `[score]` 里写了几条信号；配置读不出来就是 null */
+  signals: number | null;
+}
+
+export interface ProfilesResponse {
+  profiles: ProfileSummary[];
+  current: string;
+  profilesDir: string;
+}
+
 // ---- 配置的读写（页面上能改的就是全部配置项）
 
 /** 一个段住哪个文件。两个文件的段名完全不重叠，所以段名能唯一定位到文件。 */
