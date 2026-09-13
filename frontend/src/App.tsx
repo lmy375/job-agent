@@ -50,9 +50,9 @@ export default function App() {
               {!health.tokenConfigured && (
                 <span
                   className="badge warn"
-                  title="config/config.toml 的 [liepin.accounts.*] 里没有 user_token"
+                  title="尚未填写猎聘 Token，请到「配置 - 职位采集」页填写"
                 >
-                  未配置 token
+                  未配置 Token
                 </span>
               )}
             </>

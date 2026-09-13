@@ -19,20 +19,20 @@ const SCORE_FIELDS: FieldSpec[] = [
   {
     key: "salary_floor_wan",
     label: "薪资门槛（万元/年，税前）",
-    hint: "留空 = 不过滤。只影响「这次看什么」，不进库里的名次",
+    hint: "只显示薪资上限不低于该值的职位。留空表示不过滤；该值不参与打分，不影响分数与排名",
     kind: "number",
     nullable: true,
   },
   {
     key: "title_multiplier",
     label: "职位名权重倍数",
-    hint: "信号命中职位名时权重乘这个数——职位名比正文更能代表岗位本质",
+    hint: "信号命中职位名称时，权重按该倍数计算",
     kind: "number",
   },
   {
     key: "require.pattern",
     label: "硬性要求关键词",
-    hint: "职位名与 JD 正文都不匹配这些词就大额扣分；留空 = 不检查",
+    hint: "职位名称与职位描述中均未出现这些词时扣分。留空表示不检查",
     nullable: true,
     wide: "rest",
     placeholder: "(?a:\\bagent\\b)|智能体|大模型",
@@ -48,7 +48,7 @@ const LLM_FIELDS: FieldSpec[] = [
   {
     key: "concurrency",
     label: "并发上限",
-    hint: "1–16。再高多半先撞上各家的每分钟请求数限流",
+    hint: "同时发起的评分请求数，取值 1–16。设置过高可能触发模型服务的速率限制",
     kind: "number",
   },
 ];
@@ -87,11 +87,11 @@ export default function ScoringTab({
       const name = row.name.trim();
       const pattern = row.pattern.trim();
       if (!name && !pattern && !row.weight.trim()) return;
-      if (!name) problems.push(`第 ${index + 1} 条信号缺名字`);
-      if (!pattern) problems.push(`第 ${index + 1} 条信号缺正则`);
+      if (!name) problems.push(`第 ${index + 1} 条信号缺少名称`);
+      if (!pattern) problems.push(`第 ${index + 1} 条信号缺少正则表达式`);
       const weight = Number(row.weight.trim());
       if (row.weight.trim() === "" || !Number.isFinite(weight)) {
-        problems.push(`第 ${index + 1} 条信号的权重要填一个数字`);
+        problems.push(`第 ${index + 1} 条信号的权重需填写数字`);
       }
       rows.push({ name, weight, pattern });
     });
@@ -110,7 +110,7 @@ export default function ScoringTab({
     {
       key: "provider",
       label: "模型接入点",
-      hint: "留空 = 跟随 [agent].provider。换了模型，库里的旧分数就不可比",
+      hint: "留空表示使用「高级」页 [agent] 中配置的默认接入点。更换模型后，已有分数与新分数不具可比性",
       kind: "select",
       options: providerOptions,
       nullable: true,
@@ -126,13 +126,13 @@ export default function ScoringTab({
         title="关键词打分"
         hint={
           <>
-            整段都是「<b>你</b>想要什么」，不是通用规则——同一个词对做应用工程的人是
-            负信号、对做算法的人是最强的正信号。打分只做<b>分诊</b>（把几百条砍到几十条），
-            该不该投要读 JD。正则直接写，<code>\b</code> 之类不用转义（存成 TOML
-            字面量字符串）。
+            信号表用于<b>初步筛选</b>：按关键词命中情况为职位加减权重，把数百条职位收窄到
+            可以逐条审阅的范围，不用于判断是否值得投递。评分标准取决于个人求职方向，
+            同一个词对不同求职者可能是正信号，也可能是负信号。正则表达式按原样填写，
+            <code>\b</code> 等写法无需额外转义。
           </>
         }
-        savedNotice="打分逻辑已保存。库里的分数还是上一次算的——点「重新打分」才会按新规则重算全库排名。"
+        savedNotice="打分规则已保存。当前分数仍是上次计算的结果，点击「重新打分」按新规则重算全部职位。"
         onSaved={onSaved}
         onFailed={onFailed}
         patch={patchSignals}
@@ -152,7 +152,7 @@ export default function ScoringTab({
               <tr>
                 <th className="w-name">信号名</th>
                 <th className="w-weight">权重</th>
-                <th>正则（命中职位名或 JD 正文就加权重）</th>
+                <th>正则表达式（命中职位名称或职位描述时计入权重）</th>
                 <th />
               </tr>
             </thead>
@@ -197,7 +197,7 @@ export default function ScoringTab({
           className="link"
           onClick={() => setSignals([...signals, { name: "", weight: "", pattern: "" }])}
         >
-          + 加一条信号
+          + 添加信号
         </button>
       </SectionForm>
 
@@ -207,12 +207,13 @@ export default function ScoringTab({
         title="LLM 打分"
         hint={
           <>
-            让模型读 JD 与简历，给「岗位吸引力」与「胜任匹配度」两个分。
-            <b>按条计费</b>，所以在「职位」页挑好条目再打，没有「一键全打」。
-            怎么判断写在「提示词」页。当前：<code>{config.settings.llm_score.provider ?? "（跟随 agent）"}</code>
+            由模型阅读职位描述与简历，分别给出「岗位吸引力」与「胜任匹配度」两项评分。
+            <b>按职位条数计费</b>，因此需在「职位」页选定范围后发起，不提供一次性全库打分。
+            评分标准在「提示词」页配置。当前接入点：
+            <code>{config.settings.llm_score.provider ?? "未指定（使用默认接入点）"}</code>
           </>
         }
-        savedNotice="LLM 打分参数已保存。换了接入点的话，库里按旧模型判的分数与新的不可比。"
+        savedNotice="LLM 打分参数已保存。若更换了接入点，已有分数由此前的模型生成，与新分数不具可比性。"
         onSaved={onSaved}
         onFailed={onFailed}
       />

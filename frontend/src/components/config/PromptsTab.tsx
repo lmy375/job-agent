@@ -21,12 +21,12 @@ import type { DocKind, DocView, PromptsResponse } from "../../types";
 const DOC_META: Record<DocKind, { title: string; hint: string; placeholder: string }> = {
   resume: {
     title: "简历",
-    hint: "决定「胜任匹配度」那个分。写清年限、做过什么系统、带过多少人、技术栈——模型只看这里，简历里没写的一律按「没有」算。",
+    hint: "用于评估「胜任匹配度」。建议写明工作年限、负责过的系统、团队规模与技术栈。模型仅依据此处内容判断，未写明的经历视为不具备。",
     placeholder: "# 姓名\n\n## 经历\n- 2020–2025 某公司，后端 / 平台，带 5 人",
   },
   preferences: {
     title: "求职偏好",
-    hint: "决定「岗位吸引力」那个分的区间。写清想去什么方向、什么明确不看、薪资底线与口径、地点与硬约束。方向不对的岗位薪资再高也抬不出上限，靠的就是这份。",
+    hint: "用于评估「岗位吸引力」。建议写明期望方向、明确排除的方向、薪资底线与口径、地点及其他硬性要求。与期望方向不符的职位，薪资再高也不会获得高分。",
     placeholder: "# 求职偏好\n\n## 想要的方向\n\n## 明确不看\n\n## 薪资底线（税前）",
   },
 };
@@ -72,8 +72,8 @@ export default function PromptsTab({
       const data = await api.updateDoc(kind, docTexts[kind] ?? "");
       applyDocs(data.docs);
       onNotice(
-        `${DOC_META[kind].title}已保存。库里已有的 LLM 分数是按旧内容判的，` +
-          "和新的不可比——想要一套口径就到「职位」页重新打一遍。"
+        `${DOC_META[kind].title}已保存。已有的 LLM 分数基于修改前的内容生成，` +
+          "如需统一评分标准，请到「职位」页重新打分。"
       );
     } catch (e) {
       onFailed(errorMessage(e));
@@ -87,8 +87,8 @@ export default function PromptsTab({
     try {
       applyPrompts(await api.updatePrompts({ appeal: appealText, fit: fitText }));
       onNotice(
-        "提示词已保存。和内置默认逐字相同的内容不会落盘（那样以后改进默认方法论才传得下来）。" +
-          "库里已有的 LLM 分数与新提示词不可比，重新打一遍才是一套口径。"
+        "提示词已保存。内容与默认方法论完全一致时不会另存为自定义版本。" +
+          "已有的 LLM 分数基于修改前的提示词生成，如需统一评分标准，请到「职位」页重新打分。"
       );
     } catch (e) {
       onFailed(errorMessage(e));
@@ -100,11 +100,11 @@ export default function PromptsTab({
   return (
     <>
       <section className="panel">
-        <h3>判断依据</h3>
+        <h3>评分依据</h3>
         <p className="muted">
-          这两份和提示词一起发给模型。它们<b>没有内置默认</b>——「你是谁、你想要什么」
-          只能你自己写。写不全的地方留 <code>&lt;待补&gt;</code>，不要编，
-          模型会照着编出来的内容打分。
+          这两份内容会随提示词一并提交给模型，<b>没有默认值</b>，需要自行填写。
+          暂时无法确定的部分请填写 <code>&lt;待补&gt;</code>，不要虚构——
+          模型会将其作为事实用于评分。
         </p>
         {(Object.keys(DOC_META) as DocKind[]).map((kind) => (
           <div className="prompt-editor" key={kind}>
@@ -115,7 +115,7 @@ export default function PromptsTab({
                   className={docs[kind]?.exists ? "badge" : "badge warn"}
                   title={docs[kind]?.path}
                 >
-                  {docs[kind]?.exists ? "已填写" : "还没有"}
+                  {docs[kind]?.exists ? "已填写" : "未填写"}
                 </span>
               </span>
               <textarea
@@ -143,21 +143,21 @@ export default function PromptsTab({
         <section className="panel">
           <h3>打分方法论</h3>
           <p className="muted">
-            两段各管一个维度，模型一次调用同时给出两个分。这里写的是<b>怎么判断</b>，
-            「想去什么方向」写在上面的求职偏好里。清空 = 回到内置默认；
-            输出格式与 JSON Schema 那一截由代码拼，改不坏。当前模型：
-            <code>{prompts.modelLabel}</code>，提示词指纹 <code>{prompts.fingerprint}</code>。
+            两段提示词各对应一个评分维度，模型在一次调用中同时给出两项分数。此处描述的是
+            <b>评分方法</b>，期望的求职方向请写在上方的求职偏好中。清空后恢复为默认方法论；
+            输出格式由系统固定，不受此处内容影响。当前模型：
+            <code>{prompts.modelLabel}</code>，提示词版本 <code>{prompts.fingerprint}</code>。
           </p>
           <PromptEditor
             title="维度一 · 岗位吸引力"
-            hint="从求职者角度，以求职偏好里的期望为决定性标准——先按方向定分数区间，方向不对的岗位薪资再高也抬不出上限；其次才看薪资水位、公司体量与阶段、JD 专不专业、业务靠不靠谱。"
+            hint="从求职者角度评估这份工作是否值得投递：以求职偏好中的期望方向确定分数区间，再结合薪资水平、公司规模与发展阶段、职位描述的专业程度等因素在区间内调整。"
             view={prompts.appeal}
             value={appealText}
             onChange={setAppealText}
           />
           <PromptEditor
             title="维度二 · 胜任匹配度"
-            hint="从招聘方角度：硬门槛过不过、核心经历贴不贴、技术栈和职级差多少——拿到这份工作的概率。"
+            hint="从招聘方角度评估获得这份工作的可能性：硬性条件是否满足、核心经历是否匹配、技术栈与职级的差距有多大。"
             view={prompts.fit}
             value={fitText}
             onChange={setFitText}
@@ -198,7 +198,7 @@ function PromptEditor({
         <span>
           {title}
           <span className={view.isDefault ? "badge" : "badge warn"} title={view.path}>
-            {view.isDefault ? "内置默认" : "已自定义"}
+            {view.isDefault ? "默认内容" : "已自定义"}
           </span>
         </span>
         <textarea

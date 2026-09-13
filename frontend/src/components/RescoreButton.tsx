@@ -25,7 +25,7 @@ export default function RescoreButton({ onDone }: { onDone?: () => void }) {
       const result: ScoreRefreshResponse = await api.refreshScores();
       setNote(
         `已重算 ${result.scored} 条（去重后 ${result.unique} 条，` +
-          `不对口 ${result.offTrack} 条，指纹 ${result.fingerprint}）`
+          `未命中硬性要求 ${result.offTrack} 条）`
       );
       onDone?.();
     } catch (e) {
@@ -41,7 +41,7 @@ export default function RescoreButton({ onDone }: { onDone?: () => void }) {
         className="btn small"
         disabled={busy}
         onClick={run}
-        title="按当前 [score] 信号表把全库重算一遍并落库，等于命令行的 job score"
+        title="按当前信号表重新计算全部职位的分数与排名"
       >
         {busy ? "打分中…" : "重新打分"}
       </button>

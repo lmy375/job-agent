@@ -28,14 +28,14 @@ const SEARCH_FIELDS: FieldSpec[] = [
   {
     key: "address",
     label: "工作地点",
-    hint: "服务端模糊匹配；留空 = 不限地点",
+    hint: "填写城市名，模糊匹配；留空表示不限地点",
     nullable: true,
     placeholder: "北京",
   },
   {
     key: "salary_kind",
     label: "薪资口径",
-    hint: "填了薪资区间就必须选一个",
+    hint: "填写薪资区间时必须选择口径",
     kind: "select",
     options: SALARY_KINDS,
     nullable: true,
@@ -43,7 +43,7 @@ const SEARCH_FIELDS: FieldSpec[] = [
   {
     key: "salary_floor",
     label: "薪资下限（元）",
-    hint: "按区间「重叠」过滤，不是「下限 ≥ 该值」。年薪口径填 1000000 这种",
+    hint: "与该范围有交集的薪资区间都会保留，不要求职位下限高于该值。单位为元，按所选口径填写",
     kind: "number",
     nullable: true,
   },
@@ -63,8 +63,8 @@ const SEARCH_FIELDS: FieldSpec[] = [
   },
   {
     key: "max_pages",
-    label: "每个关键词翻几页",
-    hint: "上限 6（接口本身就只给这么多）。一页 40 条左右",
+    label: "每个关键词采集页数",
+    hint: "每页 20 条，最多 6 页，即每个关键词最多采集 120 条",
     kind: "number",
   },
 ];
@@ -73,19 +73,24 @@ const DETAIL_FIELDS: FieldSpec[] = [
   {
     key: "sleep_min",
     label: "请求间隔下限（秒）",
-    hint: "详情页是普通网页、不走 API，节奏得自己控",
+    hint: "每次请求前随机等待一段时间，时长在下限与上限之间取值",
     kind: "number",
   },
   { key: "sleep_max", label: "请求间隔上限（秒）", kind: "number" },
   {
     key: "block_backoff",
-    label: "被挡后退避（秒）",
-    hint: "遇 403 / 429 停多久再试",
+    label: "受限后等待（秒）",
+    hint: "被平台限制访问后，暂停多久再继续采集",
     kind: "number",
   },
   { key: "max_retries", label: "重试次数", kind: "number" },
   { key: "timeout", label: "超时（秒）", kind: "number" },
-  { key: "user_agent", label: "User-Agent", wide: "full" },
+  {
+    key: "user_agent",
+    label: "User-Agent",
+    hint: "抓取职位详情页时使用的浏览器标识，一般无需修改",
+    wide: "full",
+  },
 ];
 
 export default function CollectTab({
@@ -109,8 +114,8 @@ export default function CollectTab({
   const liepinFields: FieldSpec[] = [
     {
       key: `accounts.${account}.user_token`,
-      label: `猎聘 token（账号 ${account}）`,
-      hint: "没有它搜不了也投不了。去 liepin.com/mcp/auth 生成，过期了回来换一行",
+      label: `猎聘 Token（账号 ${account}）`,
+      hint: "搜索与投递都需要该凭证。在 liepin.com/mcp/auth 生成，失效后在此更新即可",
       kind: "secret",
       nullable: true,
       wide: "full",
@@ -118,11 +123,16 @@ export default function CollectTab({
     {
       key: "rate_limit_per_min",
       label: "接口限速（次/分钟）",
-      hint: "实测约 10 次 / 60 秒滑动窗口，触发后冷却 20 分钟以上。调大有风险",
+      hint: "平台实测上限约为每分钟 10 次，超出后会被限制访问 20 分钟以上，建议保持默认值 8",
       kind: "number",
     },
     { key: "timeout", label: "超时（秒）", kind: "number" },
-    { key: "base_url", label: "接口地址", wide: "full" },
+    {
+      key: "base_url",
+      label: "接口地址",
+      hint: "猎聘开放接口地址，一般无需修改",
+      wide: "full",
+    },
   ];
 
   return (
@@ -133,12 +143,12 @@ export default function CollectTab({
         title="搜索条件与关键词"
         hint={
           <>
-            关键词一行一个，<b>顺序就是优先级</b>：职位按 jobId 去重，每条记到的
-            searchKeyword 是最先命中它的那个词，所以最想要的方向放最前面。不想再搜的词
-            删掉即可（TOML 数组里注释掉的候选词不受影响，会原样留着）。
+            每行一个关键词，<b>顺序即优先级</b>：同一职位被多个关键词搜到时只保留一条，
+            来源记为排在最前的那个关键词，因此请把最看重的方向放在前面。删除某行后不再
+            使用该关键词搜索，已采集的职位不受影响。
           </>
         }
-        savedNotice="搜索条件已保存。去「采集任务」跑一次搜索才会按新条件采集。"
+        savedNotice="搜索条件已保存，将在下次采集时生效。可到「采集任务」页发起一次搜索。"
         onSaved={onSaved}
         onFailed={onFailed}
         patch={() => ({
@@ -162,7 +172,7 @@ export default function CollectTab({
             onChange={(e) => setKeywordsText(e.target.value)}
           />
         </label>
-        <span className="muted">{keywordCount} 个</span>
+        <span className="muted">共 {keywordCount} 个关键词</span>
       </SectionForm>
 
       <SectionForm
@@ -171,13 +181,12 @@ export default function CollectTab({
         title="猎聘账号与限速"
         hint={
           <>
-            这一段住全局 <code>config/config.toml</code>，所有 profile 共用。
-            token 明文显示：本机单人用，能打开这个页面就能 <code>cat</code> 到那个文件，
-            打码只会让人没法在这里填。多账号并存请直接编辑文件的
-            <code>[liepin.accounts.*]</code>，再用「高级」页确认。
+            账号与限速由所有 profile 共用，保存在全局配置 <code>config/config.toml</code> 中。
+            凭证以明文显示，便于核对与更新。如需同时保留多个账号，可在「高级」页的{" "}
+            <code>[liepin.accounts.*]</code> 中添加，再由各 profile 指定使用哪一个。
           </>
         }
-        savedNotice="账号与限速已保存。限速改大之后如果开始报 429，改回 8 并等 20 分钟。"
+        savedNotice="账号与限速已保存。若采集时出现访问受限，请将限速调回 8，等待 20 分钟后重试。"
         onSaved={onSaved}
         onFailed={onFailed}
       />
@@ -185,9 +194,9 @@ export default function CollectTab({
       <SectionForm
         section={sections.detail}
         fields={DETAIL_FIELDS}
-        title="详情页抓取节奏"
-        hint="抓 JD 走的是普通网页，被挡了就得退避重来。间隔调小会更快，也更容易吃 403。"
-        savedNotice="抓取节奏已保存。"
+        title="职位详情抓取"
+        hint="控制职位详情页的抓取速度。间隔越短采集越快，触发平台限制的概率也越高。"
+        savedNotice="抓取参数已保存。"
         onSaved={onSaved}
         onFailed={onFailed}
       />

@@ -22,11 +22,11 @@ import type { ConfigFileView, ConfigResponse, ConfigScope } from "../../types";
 const SCOPE_META: Record<ConfigScope, { title: string; hint: string }> = {
   global: {
     title: "全局配置",
-    hint: "管「怎么连」，所有 profile 共用：猎聘账号与限速、模型接入点与 API key、Web 端口、日志。换机器改这里，换求职方向不该动它一个字。",
+    hint: "所有 profile 共用的连接与运行配置：猎聘账号与限速、模型接入点与 API Key、Web 服务端口、日志。",
   },
   profile: {
     title: "当前 profile 的配置",
-    hint: "管「找什么」，随人而变：搜索条件与关键词、数据库位置、[score] 打分门槛与信号表。换个人跑就换整个 profile 目录，这个文件跟着走。",
+    hint: "仅对当前 profile 生效：搜索条件与关键词、数据文件位置、打分门槛与信号表。",
   },
 };
 
@@ -71,15 +71,15 @@ export default function AdvancedTab({
   return (
     <>
       <p className="muted">
-        改完按保存会<b>先校验再落盘</b>：TOML 语法不对或字段不合法就原地拒绝，
-        文件一个字节不动。保存成功即重新加载，CLI 与 <code>job agent</code>
-        下一次跑读到的就是这份。
+        保存前会<b>先校验</b>：TOML 语法错误或字段不合法时将拒绝保存，原文件保持不变。
+        保存成功后配置立即重新加载，命令行与 <code>job agent</code> 下次运行时使用的
+        也是这份配置。
       </p>
       {files.map((file) => (
         <section className="panel" key={file.scope}>
           <h3>
             {SCOPE_META[file.scope].title}
-            {!file.exists && <span className="badge warn">文件还不存在，保存即新建</span>}
+            {!file.exists && <span className="badge warn">文件不存在，保存后自动创建</span>}
           </h3>
           <p className="muted">{SCOPE_META[file.scope].hint}</p>
           <p className="muted mono file-path">{file.path}</p>
@@ -99,11 +99,11 @@ export default function AdvancedTab({
               disabled={saving !== ""}
               onClick={() => setTexts({ ...texts, [file.scope]: file.text })}
             >
-              放弃改动
+              放弃修改
             </button>
             <span className="muted">
-              {(texts[file.scope] ?? "").split("\n").length} 行
-              {texts[file.scope] !== file.text && " · 有未保存的改动"}
+              共 {(texts[file.scope] ?? "").split("\n").length} 行
+              {texts[file.scope] !== file.text && " · 有未保存的修改"}
             </span>
           </div>
         </section>

@@ -26,7 +26,7 @@ export interface FieldSpec {
   /** 字段名。支持 `accounts.default.user_token` 这样的点分路径 */
   key: string;
   label: string;
-  /** 标签下面那句解释。说清「这个值大了小了会怎样」，不重复字段名 */
+  /** 标签下面那句解释。只说这个值有什么效果、填大填小会怎样；不讲实现，不重复字段名 */
   hint?: string;
   kind?: FieldKind;
   options?: { value: string; label: string }[];
@@ -87,13 +87,13 @@ function fromText(field: FieldSpec, text: string, problems: string[]): unknown {
   if (field.kind === "bool") return trimmed === "true";
   if (trimmed === "") {
     if (field.nullable) return null;
-    problems.push(`${field.label}不能留空`);
+    problems.push(`${field.label}不能为空`);
     return "";
   }
   if (field.kind === "number") {
     const value = Number(trimmed);
     if (!Number.isFinite(value)) {
-      problems.push(`${field.label}要填一个数字`);
+      problems.push(`${field.label}需填写数字`);
       return 0;
     }
     return value;
@@ -188,7 +188,7 @@ export function SectionForm({
                 value={texts[field.key] ?? ""}
                 onChange={(e) => setTexts({ ...texts, [field.key]: e.target.value })}
               >
-                {field.nullable && <option value="">（不设）</option>}
+                {field.nullable && <option value="">（不设置）</option>}
                 {(field.options ?? []).map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
@@ -214,7 +214,7 @@ export function SectionForm({
           {saving ? "保存中…" : "保存"}
         </button>
         <span className="muted" title={section.file}>
-          写回 {section.scope === "global" ? "config/config.toml" : "profile.toml"}
+          保存至 {section.scope === "global" ? "config/config.toml" : "profile.toml"}
         </span>
         {footer}
       </div>
