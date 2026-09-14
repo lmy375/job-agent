@@ -11,7 +11,7 @@
 | --- | --- | --- |
 | 结论必须可重跑、可测试、两次一样 | **CLI**（`src/job_agent/`） | 采集、限流退避、去重、JD 解析、薪资换算、规则打分与落库、排序 |
 | 需要读懂文字，但每条独立、结果要**存下来复用** | **CLI 里的判断层** | `job llm-score`：读 JD 比硬门槛、给两个维度打分并落库 |
-| 需要读懂数据、边看边改配置 | **Skill**（`.claude/skills/`） | `/job-init` 访谈生成 profile；`/job-align` 对照 LLM 分校准信号表 |
+| 需要读懂数据、边看边改配置 | **Skill**（`.claude/skills/`） | `/job-init` 访谈生成 profile；`/job-align` 对照 LLM 分校准信号表；`/job-analysis` 读 JD 现场分析就业市场 |
 | 随人而变 | **Profile**（`profiles/<名字>/`） | 简历、求职偏好、搜索关键词、匹配信号表、打分提示词 |
 
 第二行是后加的一档，边界要说清楚：**LLM 打分进代码，不是因为它确定性
@@ -49,8 +49,10 @@
 
 分析这件事**太因人而异**：同一批 JD，做算法的人想看框架分布，做管理的人想看
 汇报线与团队规模，换城市的人想看地域薪资差。任何一种固定切法都只对写它的人有用。
-所以这一层交给 skill（读 JD 现场分析）或用户自己的脚本（`scripts/` 里的一次性工具），
-仓库只负责把**事实**准备好。
+所以这一层交给 skill（`/job-analysis`：读 JD 现场分析，脚本写在 scratchpad 里，
+用完就丢）或用户自己的脚本（`scripts/` 里的一次性工具），仓库只负责把**事实**准备好。
+**「有个 skill 在做这件事」不是把它挪回 `src/` 的理由**——它每次都按当次的问题
+现切口径，固化下来就又变回那个只对写它的人有用的 `job report`。
 
 具体边界：
 
@@ -271,6 +273,7 @@ job search → job score → job llm-score --top 30 → job web 翻 JD、点投�
           ↘ job align → /job-align   （有了 LLM 分之后：对照它校准 [score] 信号表）
           ↘ job score -o data/shortlist.md （候选清单骨架，判断部分留白给人填）
           ↘ job web （翻 JD、看库存、点投递、改关键词/打分逻辑/提示词、批量打分）
+          ↘ /job-analysis   （这批数据说明什么：口径准确率、价格分位、方向分布、简历差距）
 
 job [-p <名字>] agent [--collect] [--apply]   # 同一条流程的无人值守版，
                                               # 与 CLI 共享同一个 profile 目录
